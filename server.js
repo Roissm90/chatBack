@@ -4,12 +4,15 @@ const { Server } = require('socket.io');
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server);
+
+const io = new Server(server, {
+  cors: {
+    origin: "*", // Cambia a la URL de tu frontend si quieres seguridad
+    methods: ["GET", "POST"],
+  },
+});
 
 const PORT = process.env.PORT || 3000;
-
-// Servir archivos estáticos si los tienes
-app.use(express.static('public'));
 
 // Ruta de prueba
 app.get('/', (req, res) => {
@@ -18,15 +21,15 @@ app.get('/', (req, res) => {
 
 // Manejo de sockets
 io.on('connection', (socket) => {
-  console.log('Un usuario se ha conectado');
+  console.log('Usuario conectado:', socket.id);
 
   socket.on('mensaje', (msg) => {
-    console.log('Mensaje recibido: ', msg);
-    io.emit('mensaje', msg);
+    console.log('Mensaje recibido:', msg);
+    io.emit('mensaje', msg); // Enviar a todos los clientes
   });
 
   socket.on('disconnect', () => {
-    console.log('Un usuario se ha desconectado');
+    console.log('Usuario desconectado:', socket.id);
   });
 });
 
