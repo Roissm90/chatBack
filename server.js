@@ -7,18 +7,20 @@ const server = http.createServer(app);
 
 const io = new Server(server, {
   cors: {
-    origin: "*", // Cambiar por URL de frontend en producción
+    origin: "*", // Cambia por la URL de tu frontend en producción
     methods: ["GET", "POST"],
   },
 });
 
 const PORT = process.env.PORT || 3000;
 
+// Ruta de prueba
 app.get('/', (req, res) => {
   res.send('¡Servidor funcionando!');
 });
 
-const usuarios = {}; // socket.id => username
+// Usuarios conectados: socket.id => username
+const usuarios = {};
 
 io.on('connection', (socket) => {
   console.log('Usuario conectado:', socket.id);
@@ -35,15 +37,27 @@ io.on('connection', (socket) => {
     io.emit('usuarios-conectados', Object.values(usuarios));
   });
 
+  // Usuario envía un mensaje
+  socket.on('mensaje', (msg) => {
+    const username = usuarios[socket.id] || 'Anon';
+    io.emit('mensaje', { user: username, text: msg });
+  });
+
+  // Usuario se desconecta
   socket.on('disconnect', () => {
     const username = usuarios[socket.id] || 'Anon';
     console.log('Usuario desconectado:', username);
     delete usuarios[socket.id];
+
+    // Actualizar lista de usuarios conectados
     io.emit('usuarios-conectados', Object.values(usuarios));
+
+    // Avisar a los demás que alguien se fue
+    socket.broadcast.emit('user-left', { username });
   });
 });
-
 
 server.listen(PORT, () => {
   console.log(`Servidor escuchando en el puerto ${PORT}`);
 });
+
