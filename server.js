@@ -14,7 +14,6 @@ const io = new Server(server, {
 
 const PORT = process.env.PORT || 3000;
 
-// Ruta de prueba
 app.get("/", (req, res) => {
   res.send("¡Servidor funcionando!");
 });
@@ -30,7 +29,7 @@ io.on("connection", (socket) => {
     usuarios[socket.id] = username;
     console.log(`${username} se ha unido al chat`);
 
-    // Avisar a todos menos a él que alguien se unió
+    // Avisar a todos menos a él
     socket.broadcast.emit("user-joined", { username });
 
     // Enviar lista actualizada a todos
@@ -42,8 +41,8 @@ io.on("connection", (socket) => {
     const username = usuarios[socket.id] || "User";
     const mensajeObj = {
       user: username,
-      text: msg,
-      timestamp: Date.now(),
+      text: msg.text,         // Asegúrate de que msg es objeto con { text }
+      timestamp: msg.timestamp || Date.now(),
     };
     io.emit("mensaje", mensajeObj);
   });
@@ -57,7 +56,7 @@ io.on("connection", (socket) => {
     // Actualizar lista de usuarios conectados
     io.emit("usuarios-conectados", Object.values(usuarios));
 
-    // Avisar a los demás que alguien se fue
+    // Avisar a los demás
     socket.broadcast.emit("user-left", { username });
   });
 });
