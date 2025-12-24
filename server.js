@@ -3,131 +3,96 @@ const http = require("http");
 const { Server } = require("socket.io");
 const mongoose = require("mongoose");
 require("dotenv").config();
-
 const User = require("./models/User");
 
 const app = express();
 const server = http.createServer(app);
+const io = new Server(server, { cors: { origin: "*" } });
 
-const io = new Server(server, {
-  cors: { origin: "*", methods: ["GET", "POST"] },
-});
+mongoose.connect(process.env.MONGO_URI).then(() => console.log("✅ MongoDB Conectado"));
 
-const PORT = process.env.PORT || 10000;
-
-// 🔌 Conectar MongoDB Atlas
-mongoose
-  .connect(process.env.MONGO_URI)
-  .then(() => console.log("✅ Conectado a MongoDB Atlas"))
-  .catch((err) => console.error("❌ Error de conexión:", err));
-
-app.get("/", (req, res) => res.send("Servidor funcionando"));
-
-// Memoria para usuarios conectados: { socketId: { username, mongoId } }
-const usuariosActivos = {};
+const usuariosConectados = {}; // { mongoId: socketId }
 
 io.on("connection", (socket) => {
-  console.log("Usuario conectado:", socket.id);
-
+  
   socket.on("join", async ({ username }) => {
     try {
       let user = await User.findOne({ username });
-      if (!user) {
-        user = await User.create({ 
-          username, 
-          conversations: [{ withUser: "General", messages: [] }] 
-        });
-      }
+      if (!user) user = await User.create({ username, conversations: [] });
 
-      // Guardamos la info del usuario vinculada a su socket
-      usuariosActivos[socket.id] = { 
-        username: user.username, 
-        mongoId: user._id.toString() 
-      };
+      // Mapeamos el ID de usuario al socket actual
+      usuariosConectados[user._id.toString()] = socket.id;
+      socket.mongoId = user._id.toString();
+      socket.username = user.username;
 
-      // 1. Enviamos el ID propio al cliente
       socket.emit("init-session", { userId: user._id.toString() });
 
-      // 2. Enviamos historial "General" por defecto al entrar
-      const convGeneral = user.conversations.find(c => c.withUser === "General");
-      socket.emit("historial", convGeneral ? convGeneral.messages : []);
+      // Enviamos TODAS las conversaciones que tiene este usuario (su "bandeja de entrada")
+      // Esto incluye con quién ha hablado, aunque el otro esté offline
+      socket.emit("mis-conversaciones", user.conversations);
 
-      // 3. Enviamos lista de usuarios (objetos con nombre e ID)
-      const listaParaEnviar = Object.values(usuariosActivos);
-      io.emit("usuarios-conectados", listaParaEnviar);
+      // Enviamos lista de usuarios globales para iniciar nuevos chats
+      const todos = await User.find({}, "username _id");
+      io.emit("lista-usuarios-global", todos);
 
-    } catch (error) {
-      console.error("Error en join:", error);
-    }
+    } catch (e) { console.error(e); }
   });
 
-  // NUEVO: Cargar historial específico entre dos personas
-  socket.on("get-private-history", async ({ otherUserId }) => {
-    const me = usuariosActivos[socket.id];
-    if (!me) return;
+  // Cargar mensajes de un chat específico
+  socket.on("get-chat", async ({ withUserId }) => {
     try {
-      const user = await User.findById(me.mongoId);
-      const conv = user.conversations.find(c => c.withUser === otherUserId);
+      const user = await User.findById(socket.mongoId);
+      const conv = user.conversations.find(c => c.withUser === withUserId);
       socket.emit("historial", conv ? conv.messages : []);
     } catch (e) { console.error(e); }
   });
 
   socket.on("mensaje", async ({ text, toUserId }) => {
-    const fromUser = usuariosActivos[socket.id];
-    if (!fromUser || !text) return;
+    if (!socket.mongoId || !toUserId) return;
 
-    const target = toUserId || "General";
     const mensajeObj = {
-      user: fromUser.username,
-      text: text,
-      timestamp: new Date(),
+      user: socket.username,
+      text,
+      timestamp: new Date()
     };
 
     try {
-      if (target === "General") {
-        // Chat Grupal: Guardar en todos los que tengan la sala General
-        await User.updateMany(
-          { "conversations.withUser": "General" },
-          { $push: { "conversations.$.messages": mensajeObj } }
-        );
-        io.emit("mensaje", mensajeObj);
-      } else {
-        // Chat Privado: Guardar en emisor y receptor
-        const ids = [fromUser.mongoId, target];
-        for (const id of ids) {
-          const recipientOfThisRecord = (id === fromUser.mongoId) ? target : fromUser.mongoId;
-          
-          const persona = await User.findById(id);
-          if (!persona) continue;
-
-          let c = persona.conversations.find(conv => conv.withUser === recipientOfThisRecord);
-          if (!c) {
-            persona.conversations.push({ withUser: recipientOfThisRecord, messages: [mensajeObj] });
-          } else {
-            c.messages.push(mensajeObj);
-          }
-          await persona.save();
-        }
-
-        // Emitir solo a los dos implicados
-        const receptorSocket = Object.keys(usuariosActivos).find(
-          k => usuariosActivos[k].mongoId === target
-        );
+      // GUARDAR EN AMBOS (Remitente y Destinatario)
+      const participantes = [socket.mongoId, toUserId];
+      
+      for (const id of participantes) {
+        const targetId = (id === socket.mongoId) ? toUserId : socket.mongoId;
         
-        socket.emit("mensaje", mensajeObj); // Al emisor
-        if (receptorSocket) {
-          io.to(receptorSocket).emit("mensaje", mensajeObj); // Al receptor
+        await User.findByIdAndUpdate(id, {
+          $push: { "conversations": { withUser: targetId, messages: [] } }
+        }).catch(() => {}); // Evita error si ya existe
+
+        const persona = await User.findById(id);
+        let c = persona.conversations.find(conv => conv.withUser === targetId);
+        
+        if (!c) {
+          persona.conversations.push({ withUser: targetId, messages: [mensajeObj] });
+        } else {
+          c.messages.push(mensajeObj);
         }
+        await persona.save();
       }
-    } catch (error) {
-      console.error("Error en mensaje:", error);
-    }
+
+      // ENVIAR EN TIEMPO REAL
+      // Al emisor siempre
+      socket.emit("mensaje", mensajeObj);
+      
+      // Al receptor solo si está online
+      const receptorSocketId = usuariosConectados[toUserId];
+      if (receptorSocketId) {
+        io.to(receptorSocketId).emit("mensaje", mensajeObj);
+      }
+    } catch (e) { console.error(e); }
   });
 
   socket.on("disconnect", () => {
-    delete usuariosActivos[socket.id];
-    io.emit("usuarios-conectados", Object.values(usuariosActivos));
+    if (socket.mongoId) delete usuariosConectados[socket.mongoId];
   });
 });
 
-server.listen(PORT, () => console.log(`Servidor en puerto ${PORT}`));
+server.listen(process.env.PORT || 10000);
