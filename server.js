@@ -28,44 +28,25 @@ const usuarios = {};
 io.on("connection", (socket) => {
   console.log("Usuario conectado:", socket.id);
 
-  socket.on("join", async ({ username }) => {
-    usuarios[socket.id] = username;
-
-    try {
-      // 1. Aseguramos que el usuario existe
-      let user = await User.findOne({ username });
-      if (!user) {
-        await User.create({ username, conversations: [] });
-      }
-
-      // 2. LA CLAVE: Buscar mensajes de TODOS los usuarios para el historial global
-      // Traemos a todos los usuarios y aplanamos sus conversaciones 'General'
-      const todosLosUsuarios = await User.find({});
-      let historialGlobal = [];
-
-      todosLosUsuarios.forEach((u) => {
-        const convGeneral = u.conversations.find(
-          (c) => c.withUser === "General"
-        );
-        if (convGeneral) {
-          historialGlobal.push(...convGeneral.messages);
-        }
-      });
-
-      // 3. Ordenar por fecha para que no salgan desordenados
-      historialGlobal.sort(
-        (a, b) => new Date(a.timestamp) - new Date(b.timestamp)
-      );
-
-      console.log(`Enviando historial compartido a ${username}`);
-      socket.emit("historial", historialGlobal);
-
-      socket.broadcast.emit("user-joined", { username });
-      io.emit("usuarios-conectados", Object.values(usuarios));
-    } catch (error) {
-      console.error("Error en historial compartido:", error);
+  // En el evento 'join' del server.js
+socket.on("join", async ({ username }) => {
+  try {
+    let user = await User.findOne({ username });
+    if (!user) {
+      user = await User.create({ username, conversations: [] });
     }
-  });
+    
+    usuarios[socket.id] = { username: user.username, id: user._id };
+
+    socket.emit("init-session", { myId: user._id });
+
+    const listaConectados = Object.values(usuarios);
+    io.emit("usuarios-conectados", listaConectados);
+    
+  } catch (error) {
+    console.error("Error al unir usuario:", error);
+  }
+});
 
   socket.on("mensaje", async ({ text }) => {
     const fromUser = usuarios[socket.id];
