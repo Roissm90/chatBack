@@ -1,8 +1,8 @@
-require("dotenv").config();
 const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
 const mongoose = require("mongoose");
+require('dotenv').config();
 
 const User = require("./models/User");
 
@@ -13,81 +13,95 @@ const io = new Server(server, {
   cors: { origin: "*", methods: ["GET", "POST"] },
 });
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 10000;
 
-// 🔌 Conectar MongoDB Atlas (reemplaza tu URI)
+// 🔌 Conectar MongoDB Atlas
 mongoose
   .connect(process.env.MONGO_URI)
   .then(() => console.log("✅ Conectado a MongoDB Atlas"))
-  .catch((err) => console.error("❌ Error de conexión:", err));
+  .catch(err => console.error("❌ Error de conexión:", err));
 
 app.get("/", (req, res) => res.send("Servidor funcionando"));
 
-// Usuarios conectados temporalmente
 const usuarios = {};
 
 io.on("connection", (socket) => {
   console.log("Usuario conectado:", socket.id);
 
-  // Unirse con username
   socket.on("join", async ({ username }) => {
     usuarios[socket.id] = username;
 
-    // Buscar usuario en DB o crear si no existe
-    let user = await User.findOne({ username });
-    if (!user) {
-      user = await User.create({ username, conversations: [] });
+    try {
+      let user = await User.findOne({ username });
+      if (!user) {
+        user = await User.create({ username, conversations: [] });
+      }
+
+      // IMPORTANTE: Buscamos los mensajes de la conversación 'General'
+      const convGeneral = user.conversations.find(c => c.withUser === "General");
+      const historial = convGeneral ? convGeneral.messages : [];
+      
+      console.log(`Enviando historial a ${username}:`, historial.length, "mensajes");
+      socket.emit("historial", historial);
+
+      socket.broadcast.emit("user-joined", { username });
+      io.emit("usuarios-conectados", Object.values(usuarios));
+    } catch (error) {
+      console.error("Error en join:", error);
     }
-
-    // Enviar historial completo al frontend
-    console.log(`Historial de ${username}:`, user.conversations);
-    socket.emit("historial", user.conversations);
-
-    socket.broadcast.emit("user-joined", { username });
-    io.emit("usuarios-conectados", Object.values(usuarios));
   });
 
-  // Enviar mensaje
   socket.on("mensaje", async ({ text }) => {
     const fromUser = usuarios[socket.id];
-    if (!fromUser) return;
+    if (!fromUser || !text) return;
 
     const mensajeObj = {
-      user: fromUser, // El backend añade quién lo envía
+      user: fromUser,
       text: text,
       timestamp: new Date(),
     };
 
     try {
-      // 1. Guardar en MongoDB Atlas
-      const user = await User.findOne({ username: fromUser });
-      if (user) {
-        let conv = user.conversations.find((c) => c.withUser === "General");
-        if (!conv) {
-          conv = { withUser: "General", messages: [] };
-          user.conversations.push(conv);
+      // Guardar el mensaje para TODOS los usuarios que tengan una cuenta (Chat Global)
+      // Esto asegura que cuando Laura entre, vea lo que escribió Santi
+      await User.updateMany(
+        {}, 
+        { 
+          $push: { 
+            conversations: { 
+              $each: [], // Truco para asegurar que la estructura existe
+            } 
+          } 
         }
-        conv.messages.push(mensajeObj);
-        await user.save();
-      }
+      );
 
-      // 2. IMPORTANTE: Enviar el mensaje a TODO EL MUNDO (incluyéndote a ti)
-      io.emit("mensaje", mensajeObj);
-    } catch (err) {
-      console.error("Error al guardar mensaje:", err);
+      // Lógica simplificada: Actualizamos al emisor y emitimos a todos
+      const sender = await User.findOne({ username: fromUser });
+      let conv = sender.conversations.find(c => c.withUser === "General");
+      
+      if (!conv) {
+        sender.conversations.push({ withUser: "General", messages: [mensajeObj] });
+      } else {
+        conv.messages.push(mensajeObj);
+      }
+      
+      await sender.save();
+
+      // 🔥 ESTA ES LA CLAVE: Enviamos el mensaje a todos los clientes conectados AHORA
+      console.log(`[Mensaje] ${fromUser}: ${text}`);
+      io.emit("mensaje", mensajeObj); 
+
+    } catch (error) {
+      console.error("Error al procesar mensaje:", error);
     }
   });
 
-  // Desconectar
   socket.on("disconnect", () => {
     const username = usuarios[socket.id];
     delete usuarios[socket.id];
     io.emit("usuarios-conectados", Object.values(usuarios));
-    socket.broadcast.emit("user-left", { username });
     console.log(`Usuario desconectado: ${username}`);
   });
 });
 
-server.listen(PORT, () =>
-  console.log(`Servidor escuchando en el puerto ${PORT}`)
-);
+server.listen(PORT, () => console.log(`Servidor en puerto ${PORT}`));
