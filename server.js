@@ -1,9 +1,8 @@
-require('dotenv').config();
+require("dotenv").config();
 const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
 const mongoose = require("mongoose");
-
 
 const User = require("./models/User");
 
@@ -17,9 +16,10 @@ const io = new Server(server, {
 const PORT = process.env.PORT || 3000;
 
 // 🔌 Conectar MongoDB Atlas (reemplaza tu URI)
-mongoose.connect(process.env.MONGO_URI)
+mongoose
+  .connect(process.env.MONGO_URI)
   .then(() => console.log("✅ Conectado a MongoDB Atlas"))
-  .catch(err => console.error("❌ Error de conexión:", err));
+  .catch((err) => console.error("❌ Error de conexión:", err));
 
 app.get("/", (req, res) => res.send("Servidor funcionando"));
 
@@ -48,54 +48,34 @@ io.on("connection", (socket) => {
   });
 
   // Enviar mensaje
-  socket.on("mensaje", async ({ toUser, text }) => {
+  socket.on("mensaje", async ({ text }) => {
     const fromUser = usuarios[socket.id];
     if (!fromUser) return;
 
-    // Buscar usuarios
-    const sender = await User.findOne({ username: fromUser });
-    const receiver = await User.findOne({ username: toUser });
-
-    if (!receiver) {
-      console.log(`Usuario destino ${toUser} no encontrado`);
-      return;
-    }
-
-    // Buscar o crear conversación en sender
-    let conversationSender = sender.conversations.find(
-      (c) => c.withUser === toUser
-    );
-    if (!conversationSender) {
-      conversationSender = { withUser: toUser, messages: [] };
-      sender.conversations.push(conversationSender);
-    }
-
-    // Buscar o crear conversación en receiver
-    let conversationReceiver = receiver.conversations.find(
-      (c) => c.withUser === fromUser
-    );
-    if (!conversationReceiver) {
-      conversationReceiver = { withUser: fromUser, messages: [] };
-      receiver.conversations.push(conversationReceiver);
-    }
-
     const mensajeObj = {
-      user: fromUser,
-      text,
+      user: fromUser, // El backend añade quién lo envía
+      text: text,
       timestamp: new Date(),
     };
 
-    // Guardar mensaje en ambas conversaciones
-    conversationSender.messages.push(mensajeObj);
-    conversationReceiver.messages.push(mensajeObj);
+    try {
+      // 1. Guardar en MongoDB Atlas
+      const user = await User.findOne({ username: fromUser });
+      if (user) {
+        let conv = user.conversations.find((c) => c.withUser === "General");
+        if (!conv) {
+          conv = { withUser: "General", messages: [] };
+          user.conversations.push(conv);
+        }
+        conv.messages.push(mensajeObj);
+        await user.save();
+      }
 
-    // Guardar cambios en DB
-    await sender.save();
-    await receiver.save();
-
-    // Emitir mensaje a todos (temporal, luego se puede filtrar por conversación)
-    io.emit("mensaje", mensajeObj);
-    console.log(`[Mensaje] ${fromUser} -> ${toUser}: ${text}`);
+      // 2. IMPORTANTE: Enviar el mensaje a TODO EL MUNDO (incluyéndote a ti)
+      io.emit("mensaje", mensajeObj);
+    } catch (err) {
+      console.error("Error al guardar mensaje:", err);
+    }
   });
 
   // Desconectar
