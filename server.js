@@ -10,7 +10,7 @@ const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: "*" } });
 
 mongoose.connect(process.env.MONGO_URI)
-  .then(() => console.log("✅ Conexión establecida con Atlas"))
+  .then(() => console.log("✅ Atlas Conectado"))
   .catch(err => console.error("❌ Error Mongo:", err));
 
 const usuariosConectados = {}; 
@@ -24,18 +24,15 @@ io.on("connection", (socket) => {
         user = await User.create({ username, conversations: [] });
       }
 
-      // Sincronizamos Socket ID con el ID de Mongo
       usuariosConectados[user._id.toString()] = socket.id;
       socket.mongoId = user._id.toString();
       socket.username = user.username;
 
       socket.emit("init-session", { userId: user._id.toString() });
 
-      // Enviamos todos los usuarios registrados para la "agenda" de contactos
-      const listaContactos = await User.find({}, "username _id");
-      io.emit("lista-usuarios-global", listaContactos);
-
-    } catch (e) { console.error("Error en join:", e); }
+      const lista = await User.find({}, "username _id");
+      io.emit("lista-usuarios-global", lista);
+    } catch (e) { console.log(e); }
   });
 
   socket.on("get-chat", async ({ withUserId }) => {
@@ -44,7 +41,7 @@ io.on("connection", (socket) => {
       const user = await User.findById(socket.mongoId);
       const conv = user.conversations.find(c => c.withUser === withUserId);
       socket.emit("historial", conv ? conv.messages : []);
-    } catch (e) { console.error("Error cargando historial:", e); }
+    } catch (e) { console.log(e); }
   });
 
   socket.on("mensaje", async ({ text, toUserId }) => {
@@ -52,14 +49,13 @@ io.on("connection", (socket) => {
 
     const mensajeObj = {
       user: socket.username,
-      text: text,
+      text,
       timestamp: new Date()
     };
 
     try {
-      // Guardado persistente en emisor y receptor
-      const ids = [socket.mongoId, toUserId];
-      for (const id of ids) {
+      // Guardar en ambos (Remitente y Destinatario)
+      for (let id of [socket.mongoId, toUserId]) {
         const targetId = (id === socket.mongoId) ? toUserId : socket.mongoId;
         const persona = await User.findById(id);
         if (!persona) continue;
@@ -73,13 +69,13 @@ io.on("connection", (socket) => {
         await persona.save();
       }
 
-      // Envío en tiempo real
+      // Enviar
       socket.emit("mensaje", mensajeObj);
-      const destinoSocketId = usuariosConectados[toUserId];
-      if (destinoSocketId) {
-        io.to(destinoSocketId).emit("mensaje", mensajeObj);
+      const receptorSocketId = usuariosConectados[toUserId];
+      if (receptorSocketId) {
+        io.to(receptorSocketId).emit("mensaje", mensajeObj);
       }
-    } catch (e) { console.error("Error enviando mensaje:", e); }
+    } catch (e) { console.log(e); }
   });
 
   socket.on("disconnect", () => {
@@ -87,5 +83,4 @@ io.on("connection", (socket) => {
   });
 });
 
-const PORT = process.env.PORT || 10000;
-server.listen(PORT, () => console.log(`🚀 Servidor en puerto ${PORT}`));
+server.listen(process.env.PORT || 10000);
