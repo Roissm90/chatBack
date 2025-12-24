@@ -23,83 +23,87 @@ mongoose
 
 app.get("/", (req, res) => res.send("Servidor funcionando"));
 
-const usuarios = {};
+// Guardaremos objetos con { username, id } mapeados por el socket.id
+const usuariosActivos = {};
 
 io.on("connection", (socket) => {
   console.log("Usuario conectado:", socket.id);
 
-  // En el evento 'join' del server.js
-socket.on("join", async ({ username }) => {
-  try {
-    let user = await User.findOne({ username });
-    if (!user) {
-      user = await User.create({ username, conversations: [] });
+  socket.on("join", async ({ username }) => {
+    try {
+      // 1. Buscamos o creamos el usuario por su nombre (Alias)
+      let user = await User.findOne({ username });
+      if (!user) {
+        user = await User.create({ username, conversations: [] });
+      }
+
+      // 2. Guardamos en memoria el socket con su ID real de MongoDB
+      usuariosActivos[socket.id] = { 
+        username: user.username, 
+        mongoId: user._id.toString() 
+      };
+
+      // 3. Enviamos al frontend SU ID UNICO (init-session)
+      socket.emit("init-session", { userId: user._id.toString() });
+
+      // 4. Buscamos su historial. 
+      // Por ahora buscamos la conversación "General" para que no vea todo vacío
+      const convGeneral = user.conversations.find((c) => c.withUser === "General");
+      const historial = convGeneral ? convGeneral.messages : [];
+
+      console.log(`Historial de ${username}: ${historial.length} mensajes encontrados.`);
+      socket.emit("historial", historial);
+
+      // 5. Notificamos a todos los usuarios conectados con la lista actualizada
+      const listaNombres = Object.values(usuariosActivos).map(u => u.username);
+      io.emit("usuarios-conectados", listaNombres);
+
+    } catch (error) {
+      console.error("Error en join:", error);
     }
-    
-    usuarios[socket.id] = { username: user.username, id: user._id };
+  });
 
-    socket.emit("init-session", { myId: user._id });
-
-    const listaConectados = Object.values(usuarios);
-    io.emit("usuarios-conectados", listaConectados);
-    
-  } catch (error) {
-    console.error("Error al unir usuario:", error);
-  }
-});
-
-  socket.on("mensaje", async ({ text }) => {
-    const fromUser = usuarios[socket.id];
-    if (!fromUser || !text) return;
+  socket.on("mensaje", async ({ text, fromUserId }) => {
+    const infoUsuario = usuariosActivos[socket.id];
+    if (!infoUsuario || !text) return;
 
     const mensajeObj = {
-      user: fromUser,
+      user: infoUsuario.username,
       text: text,
       timestamp: new Date(),
     };
 
     try {
-      // Guardar el mensaje para TODOS los usuarios que tengan una cuenta (Chat Global)
-      // Esto asegura que cuando Laura entre, vea lo que escribió Santi
-      await User.updateMany(
-        {},
-        {
-          $push: {
-            conversations: {
-              $each: [], // Truco para asegurar que la estructura existe
-            },
-          },
+      // 1. Guardamos el mensaje en el documento del emisor (bajo "General")
+      // Usamos findById porque es más seguro que el nombre
+      const emisor = await User.findById(infoUsuario.mongoId);
+      if (emisor) {
+        let conv = emisor.conversations.find((c) => c.withUser === "General");
+        if (!conv) {
+          emisor.conversations.push({ withUser: "General", messages: [mensajeObj] });
+        } else {
+          conv.messages.push(mensajeObj);
         }
-      );
-
-      // Lógica simplificada: Actualizamos al emisor y emitimos a todos
-      const sender = await User.findOne({ username: fromUser });
-      let conv = sender.conversations.find((c) => c.withUser === "General");
-
-      if (!conv) {
-        sender.conversations.push({
-          withUser: "General",
-          messages: [mensajeObj],
-        });
-      } else {
-        conv.messages.push(mensajeObj);
+        await emisor.save();
       }
 
-      await sender.save();
-
-      // 🔥 ESTA ES LA CLAVE: Enviamos el mensaje a todos los clientes conectados AHORA
-      console.log(`[Mensaje] ${fromUser}: ${text}`);
+      // 2. IMPORTANTE: Enviamos el mensaje a TODOS en tiempo real
+      console.log(`[Mensaje] ${infoUsuario.username}: ${text}`);
       io.emit("mensaje", mensajeObj);
+
     } catch (error) {
-      console.error("Error al procesar mensaje:", error);
+      console.error("Error al guardar mensaje:", error);
     }
   });
 
   socket.on("disconnect", () => {
-    const username = usuarios[socket.id];
-    delete usuarios[socket.id];
-    io.emit("usuarios-conectados", Object.values(usuarios));
-    console.log(`Usuario desconectado: ${username}`);
+    if (usuariosActivos[socket.id]) {
+      const nombre = usuariosActivos[socket.id].username;
+      delete usuariosActivos[socket.id];
+      const listaNombres = Object.values(usuariosActivos).map(u => u.username);
+      io.emit("usuarios-conectados", listaNombres);
+      console.log(`Usuario desconectado: ${nombre}`);
+    }
   });
 });
 
