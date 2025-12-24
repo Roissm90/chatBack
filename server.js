@@ -1,7 +1,9 @@
+require('dotenv').config();
 const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
 const mongoose = require("mongoose");
+
 
 const User = require("./models/User");
 
@@ -14,13 +16,10 @@ const io = new Server(server, {
 
 const PORT = process.env.PORT || 3000;
 
-mongoose
-  .connect("mongodb://127.0.0.1:27017/chat", {
-    useNewUrlParser: true,
-    useUnifiedTopology: true,
-  })
-  .then(() => console.log("MongoDB conectado"))
-  .catch(console.error);
+// 🔌 Conectar MongoDB Atlas (reemplaza tu URI)
+mongoose.connect(process.env.MONGO_URI)
+  .then(() => console.log("✅ Conectado a MongoDB Atlas"))
+  .catch(err => console.error("❌ Error de conexión:", err));
 
 app.get("/", (req, res) => res.send("Servidor funcionando"));
 
@@ -30,8 +29,8 @@ const usuarios = {};
 io.on("connection", (socket) => {
   console.log("Usuario conectado:", socket.id);
 
+  // Unirse con username
   socket.on("join", async ({ username }) => {
-    // Guardar usuario conectado temporalmente
     usuarios[socket.id] = username;
 
     // Buscar usuario en DB o crear si no existe
@@ -48,11 +47,12 @@ io.on("connection", (socket) => {
     io.emit("usuarios-conectados", Object.values(usuarios));
   });
 
+  // Enviar mensaje
   socket.on("mensaje", async ({ toUser, text }) => {
     const fromUser = usuarios[socket.id];
     if (!fromUser) return;
 
-    // Buscar usuarios involucrados
+    // Buscar usuarios
     const sender = await User.findOne({ username: fromUser });
     const receiver = await User.findOne({ username: toUser });
 
@@ -85,7 +85,7 @@ io.on("connection", (socket) => {
       timestamp: new Date(),
     };
 
-    // Agregar mensaje a ambas conversaciones
+    // Guardar mensaje en ambas conversaciones
     conversationSender.messages.push(mensajeObj);
     conversationReceiver.messages.push(mensajeObj);
 
@@ -93,15 +93,21 @@ io.on("connection", (socket) => {
     await sender.save();
     await receiver.save();
 
+    // Emitir mensaje a todos (temporal, luego se puede filtrar por conversación)
     io.emit("mensaje", mensajeObj);
+    console.log(`[Mensaje] ${fromUser} -> ${toUser}: ${text}`);
   });
 
+  // Desconectar
   socket.on("disconnect", () => {
     const username = usuarios[socket.id];
     delete usuarios[socket.id];
     io.emit("usuarios-conectados", Object.values(usuarios));
     socket.broadcast.emit("user-left", { username });
+    console.log(`Usuario desconectado: ${username}`);
   });
 });
 
-server.listen(PORT, () => console.log(`Servidor escuchando en ${PORT}`));
+server.listen(PORT, () =>
+  console.log(`Servidor escuchando en el puerto ${PORT}`)
+);
