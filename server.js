@@ -11,7 +11,7 @@ const io = new Server(server, { cors: { origin: "*" } });
 
 mongoose.connect(process.env.MONGO_URI)
   .then(() => console.log("✅ Conectado a MongoDB Atlas"))
-  .catch(err => console.error("❌ Error:", err));
+  .catch(err => console.error("❌ Error de conexión:", err));
 
 const usuariosConectados = {}; // { mongoId: socketId }
 
@@ -24,41 +24,41 @@ io.on("connection", (socket) => {
         user = await User.create({ username, conversations: [] });
       }
 
-      // Guardamos quién está online
+      // Guardamos quién está online mapeando su ID de Mongo al ID del socket
       usuariosConectados[user._id.toString()] = socket.id;
       socket.mongoId = user._id.toString();
       socket.username = user.username;
 
       socket.emit("init-session", { userId: user._id.toString() });
 
-      // Enviamos a todos la lista de usuarios registrados para que puedan iniciar chats
-      const todos LosUsuarios = await User.find({}, "username _id");
+      // Corregido: Variable sin espacio para evitar el SyntaxError
+      const todosLosUsuarios = await User.find({}, "username _id");
       io.emit("lista-usuarios-global", todosLosUsuarios);
 
     } catch (e) { console.error("Error en join:", e); }
   });
 
-  // Cargar mensajes de una conversación específica (TIPO WHATSAPP)
+  // Cargar mensajes de una conversación específica (Lógica WhatsApp)
   socket.on("get-chat", async ({ withUserId }) => {
     try {
+      if (!socket.mongoId) return;
       const user = await User.findById(socket.mongoId);
       const conv = user.conversations.find(c => c.withUser === withUserId);
-      // Si no hay conversación previa, enviamos array vacío
       socket.emit("historial", conv ? conv.messages : []);
     } catch (e) { console.error(e); }
   });
 
   socket.on("mensaje", async ({ text, toUserId }) => {
-    if (!socket.mongoId || !toUserId) return;
+    if (!socket.mongoId || !toUserId || !text) return;
 
     const mensajeObj = {
       user: socket.username,
-      text,
+      text: text,
       timestamp: new Date()
     };
 
     try {
-      // GUARDAR EN AMBOS USUARIOS (LA CLAVE DE LA PERSISTENCIA)
+      // Guardar en ambos usuarios para persistencia offline
       const participantes = [socket.mongoId, toUserId];
       
       for (const id of participantes) {
@@ -77,14 +77,14 @@ io.on("connection", (socket) => {
         await persona.save();
       }
 
-      // ENVIAR EN TIEMPO REAL
-      socket.emit("mensaje", mensajeObj); // Al que envía
+      // Enviar en tiempo real
+      socket.emit("mensaje", mensajeObj); // Al emisor
       
       const receptorSocketId = usuariosConectados[toUserId];
       if (receptorSocketId) {
         io.to(receptorSocketId).emit("mensaje", mensajeObj); // Al receptor si está online
       }
-    } catch (e) { console.error(e); }
+    } catch (e) { console.error("Error guardando mensaje:", e); }
   });
 
   socket.on("disconnect", () => {
@@ -92,4 +92,5 @@ io.on("connection", (socket) => {
   });
 });
 
-server.listen(process.env.PORT || 10000, () => console.log("Servidor listo"));
+const PORT = process.env.PORT || 10000;
+server.listen(PORT, () => console.log(`🚀 Servidor listo en puerto ${PORT}`));
