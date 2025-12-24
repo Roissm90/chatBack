@@ -2,7 +2,7 @@ const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
 const mongoose = require("mongoose");
-require('dotenv').config();
+require("dotenv").config();
 
 const User = require("./models/User");
 
@@ -19,7 +19,7 @@ const PORT = process.env.PORT || 10000;
 mongoose
   .connect(process.env.MONGO_URI)
   .then(() => console.log("✅ Conectado a MongoDB Atlas"))
-  .catch(err => console.error("❌ Error de conexión:", err));
+  .catch((err) => console.error("❌ Error de conexión:", err));
 
 app.get("/", (req, res) => res.send("Servidor funcionando"));
 
@@ -32,22 +32,38 @@ io.on("connection", (socket) => {
     usuarios[socket.id] = username;
 
     try {
+      // 1. Aseguramos que el usuario existe
       let user = await User.findOne({ username });
       if (!user) {
-        user = await User.create({ username, conversations: [] });
+        await User.create({ username, conversations: [] });
       }
 
-      // IMPORTANTE: Buscamos los mensajes de la conversación 'General'
-      const convGeneral = user.conversations.find(c => c.withUser === "General");
-      const historial = convGeneral ? convGeneral.messages : [];
-      
-      console.log(`Enviando historial a ${username}:`, historial.length, "mensajes");
-      socket.emit("historial", historial);
+      // 2. LA CLAVE: Buscar mensajes de TODOS los usuarios para el historial global
+      // Traemos a todos los usuarios y aplanamos sus conversaciones 'General'
+      const todosLosUsuarios = await User.find({});
+      let historialGlobal = [];
+
+      todosLosUsuarios.forEach((u) => {
+        const convGeneral = u.conversations.find(
+          (c) => c.withUser === "General"
+        );
+        if (convGeneral) {
+          historialGlobal.push(...convGeneral.messages);
+        }
+      });
+
+      // 3. Ordenar por fecha para que no salgan desordenados
+      historialGlobal.sort(
+        (a, b) => new Date(a.timestamp) - new Date(b.timestamp)
+      );
+
+      console.log(`Enviando historial compartido a ${username}`);
+      socket.emit("historial", historialGlobal);
 
       socket.broadcast.emit("user-joined", { username });
       io.emit("usuarios-conectados", Object.values(usuarios));
     } catch (error) {
-      console.error("Error en join:", error);
+      console.error("Error en historial compartido:", error);
     }
   });
 
@@ -65,32 +81,34 @@ io.on("connection", (socket) => {
       // Guardar el mensaje para TODOS los usuarios que tengan una cuenta (Chat Global)
       // Esto asegura que cuando Laura entre, vea lo que escribió Santi
       await User.updateMany(
-        {}, 
-        { 
-          $push: { 
-            conversations: { 
+        {},
+        {
+          $push: {
+            conversations: {
               $each: [], // Truco para asegurar que la estructura existe
-            } 
-          } 
+            },
+          },
         }
       );
 
       // Lógica simplificada: Actualizamos al emisor y emitimos a todos
       const sender = await User.findOne({ username: fromUser });
-      let conv = sender.conversations.find(c => c.withUser === "General");
-      
+      let conv = sender.conversations.find((c) => c.withUser === "General");
+
       if (!conv) {
-        sender.conversations.push({ withUser: "General", messages: [mensajeObj] });
+        sender.conversations.push({
+          withUser: "General",
+          messages: [mensajeObj],
+        });
       } else {
         conv.messages.push(mensajeObj);
       }
-      
+
       await sender.save();
 
       // 🔥 ESTA ES LA CLAVE: Enviamos el mensaje a todos los clientes conectados AHORA
       console.log(`[Mensaje] ${fromUser}: ${text}`);
-      io.emit("mensaje", mensajeObj); 
-
+      io.emit("mensaje", mensajeObj);
     } catch (error) {
       console.error("Error al procesar mensaje:", error);
     }
