@@ -1,66 +1,64 @@
 const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
+const mongoose = require("mongoose");
+const Message = require("./models/Message");
 
 const app = express();
 const server = http.createServer(app);
 
 const io = new Server(server, {
-  cors: {
-    origin: "*", // Cambia por la URL de tu frontend en producción
-    methods: ["GET", "POST"],
-  },
+  cors: { origin: "*", methods: ["GET", "POST"] },
 });
 
 const PORT = process.env.PORT || 3000;
 
-app.get("/", (req, res) => {
-  res.send("¡Servidor funcionando!");
-});
+// 🔌 Conectar MongoDB
+mongoose
+  .connect("mongodb://127.0.0.1:27017/chat", {
+    useNewUrlParser: true,
+    useUnifiedTopology: true,
+  })
+  .then(() => console.log("MongoDB conectado"))
+  .catch(console.error);
 
-// Usuarios conectados: socket.id => username
+app.get("/", (req, res) => res.send("Servidor funcionando"));
+
+// Usuarios conectados
 const usuarios = {};
 
-io.on("connection", (socket) => {
+io.on("connection", async (socket) => {
   console.log("Usuario conectado:", socket.id);
 
-  // Usuario se une al chat
+  // Enviar historial al conectarse
+  const historial = await Message.find().sort({ timestamp: 1 }).limit(100);
+  socket.emit("historial", historial);
+
   socket.on("join", ({ username }) => {
     usuarios[socket.id] = username;
-    console.log(`${username} se ha unido al chat`);
-
-    // Avisar a todos menos a él
     socket.broadcast.emit("user-joined", { username });
-
-    // Enviar lista actualizada a todos
     io.emit("usuarios-conectados", Object.values(usuarios));
   });
 
-  // Usuario envía un mensaje
-  socket.on("mensaje", (msg) => {
+  socket.on("mensaje", async (msg) => {
     const username = usuarios[socket.id] || "User";
+
     const mensajeObj = {
       user: username,
-      text: msg.text,         // Asegúrate de que msg es objeto con { text }
+      text: msg.text,
       timestamp: msg.timestamp || Date.now(),
     };
-    io.emit("mensaje", mensajeObj);
+
+    const saved = await Message.create(mensajeObj);
+    io.emit("mensaje", saved);
   });
 
-  // Usuario se desconecta
   socket.on("disconnect", () => {
-    const username = usuarios[socket.id] || "Anon";
-    console.log("Usuario desconectado:", username);
+    const username = usuarios[socket.id];
     delete usuarios[socket.id];
-
-    // Actualizar lista de usuarios conectados
     io.emit("usuarios-conectados", Object.values(usuarios));
-
-    // Avisar a los demás
     socket.broadcast.emit("user-left", { username });
   });
 });
 
-server.listen(PORT, () => {
-  console.log(`Servidor escuchando en el puerto ${PORT}`);
-});
+server.listen(PORT, () => console.log(`Servidor escuchando en ${PORT}`));
