@@ -32,7 +32,7 @@ io.on("connection", (socket) => {
         if (user.username !== cleanUsername) {
           return socket.emit(
             "user-error",
-            "Este email ya pertenece a otro alias. Usa tu nombre original."
+            "Este email ya está registrado"
           );
         }
       } else {
