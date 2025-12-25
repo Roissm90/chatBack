@@ -41,24 +41,32 @@ io.on("connection", (socket) => {
             "Este email ya pertenece a otro alias."
           );
         }
-        
+
         // Verificamos contraseña
         const esValida = await bcrypt.compare(password, userByEmail.password);
         if (!esValida) {
           return socket.emit("user-error", "Contraseña incorrecta.");
         }
         user = userByEmail;
-
       } else if (userByUsername) {
         // CASO 2: El email no existe pero el ALIAS SÍ (error de coincidencia)
-        return socket.emit("user-error", "Este alias ya está registrado con otro email.");
-
+        return socket.emit(
+          "user-error",
+          "Este alias ya está registrado con otro email."
+        );
       } else {
         // CASO 3: Usuario nuevo (ni email ni alias existen)
         try {
           // Validamos formato antes de encriptar
-          const tempUser = new User({ username: cleanUsername, email: cleanEmail, password });
-          await tempUser.validate();
+          const passRegex =
+            /^(?=.*[A-Za-z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{6,}$/;
+
+          if (!passRegex.test(password)) {
+            return socket.emit(
+              "user-error",
+              "La contraseña debe tener al menos 6 caracteres, una letra, un número y un símbolo (@$!%*?&)."
+            );
+          }
 
           const salt = await bcrypt.genSalt(10);
           const passwordHasheada = await bcrypt.hash(password, salt);
@@ -66,12 +74,11 @@ io.on("connection", (socket) => {
           user = new User({
             username: cleanUsername,
             email: cleanEmail,
-            password: passwordHasheada, 
+            password: passwordHasheada,
             conversations: [],
           });
-          
-          await user.save({ validateBeforeSave: false }); 
 
+          await user.save({ validateBeforeSave: false });
         } catch (validationError) {
           if (validationError.errors && validationError.errors.password) {
             return socket.emit(
