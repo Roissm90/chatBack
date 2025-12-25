@@ -9,14 +9,14 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: "*" } });
 
-mongoose.connect(process.env.MONGO_URI)
+mongoose
+  .connect(process.env.MONGO_URI)
   .then(() => console.log("✅ Atlas Conectado"))
-  .catch(err => console.error("❌ Error Mongo:", err));
+  .catch((err) => console.error("❌ Error Mongo:", err));
 
-const usuariosConectados = {}; 
+const usuariosConectados = {};
 
 io.on("connection", (socket) => {
-  
   socket.on("join", async ({ username }) => {
     try {
       let user = await User.findOne({ username });
@@ -32,16 +32,20 @@ io.on("connection", (socket) => {
 
       const lista = await User.find({}, "username _id");
       io.emit("lista-usuarios-global", lista);
-    } catch (e) { console.log(e); }
+    } catch (e) {
+      console.log(e);
+    }
   });
 
   socket.on("get-chat", async ({ withUserId }) => {
     try {
       if (!socket.mongoId) return;
       const user = await User.findById(socket.mongoId);
-      const conv = user.conversations.find(c => c.withUser === withUserId);
+      const conv = user.conversations.find((c) => c.withUser === withUserId);
       socket.emit("historial", conv ? conv.messages : []);
-    } catch (e) { console.log(e); }
+    } catch (e) {
+      console.log(e);
+    }
   });
 
   socket.on("mensaje", async ({ text, toUserId }) => {
@@ -50,19 +54,24 @@ io.on("connection", (socket) => {
     const mensajeObj = {
       user: socket.username,
       text,
-      timestamp: new Date()
+      timestamp: new Date(),
     };
 
     try {
       // Guardar en ambos (Remitente y Destinatario)
       for (let id of [socket.mongoId, toUserId]) {
-        const targetId = (id === socket.mongoId) ? toUserId : socket.mongoId;
+        const targetId = id === socket.mongoId ? toUserId : socket.mongoId;
         const persona = await User.findById(id);
         if (!persona) continue;
 
-        let c = persona.conversations.find(conv => conv.withUser === targetId);
+        let c = persona.conversations.find(
+          (conv) => conv.withUser === targetId
+        );
         if (!c) {
-          persona.conversations.push({ withUser: targetId, messages: [mensajeObj] });
+          persona.conversations.push({
+            withUser: targetId,
+            messages: [mensajeObj],
+          });
         } else {
           c.messages.push(mensajeObj);
         }
@@ -75,11 +84,25 @@ io.on("connection", (socket) => {
       if (receptorSocketId) {
         io.to(receptorSocketId).emit("mensaje", mensajeObj);
       }
-    } catch (e) { console.log(e); }
+    } catch (e) {
+      console.log(e);
+    }
   });
 
   socket.on("disconnect", () => {
     if (socket.mongoId) delete usuariosConectados[socket.mongoId];
+  });
+
+  socket.on("reset-all-chats", async () => {
+    try {
+      await User.updateMany({}, { $set: { conversations: [] } });
+      //io.emit("all-chats-reset");
+      console.log(
+        "✅ Todas las conversaciones han sido borradas por el comando secreto."
+      );
+    } catch (e) {
+      console.log("❌ Error al borrar conversaciones:", e);
+    }
   });
 });
 
