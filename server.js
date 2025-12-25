@@ -17,13 +17,35 @@ mongoose
 const usuariosConectados = {};
 
 io.on("connection", (socket) => {
-  socket.on("join", async ({ username }) => {
+  socket.on("join", async ({ username, email }) => {
     try {
-      let user = await User.findOne({ username });
-      if (!user) {
-        user = await User.create({ username, conversations: [] });
+      if (!email || !username) return;
+
+      // Buscamos si el email ya existe
+      let user = await User.findOne({ email });
+
+      if (user) {
+        if (user.username !== username) {
+          return socket.emit(
+            "user-error",
+            "Este email ya está vinculado a otro alias."
+          );
+        }
+      } else {
+        // Si no existe, comprobamos que el alias tampoco esté pillado por otro email
+        let nameCheck = await User.findOne({ username });
+        if (nameCheck) {
+          return socket.emit(
+            "user-error",
+            "El alias ya está en uso por otro usuario."
+          );
+        }
+
+        // Si todo está bien, creamos el usuario
+        user = await User.create({ username, email, conversations: [] });
       }
 
+      // Si pasa las validaciones, procedemos normal
       usuariosConectados[user._id.toString()] = socket.id;
       socket.mongoId = user._id.toString();
       socket.username = user.username;
