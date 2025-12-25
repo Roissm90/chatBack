@@ -2,6 +2,7 @@ const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
 const mongoose = require("mongoose");
+const bcrypt = require("bcrypt"); // 1. Importación de bcrypt
 require("dotenv").config();
 const User = require("./models/User");
 
@@ -17,45 +18,76 @@ mongoose
 const usuariosConectados = {};
 
 io.on("connection", (socket) => {
-  socket.on("join", async ({ username, email }) => {
+  socket.on("join", async ({ username, email, password }) => {
     try {
-      if (!email || !username) return;
+      if (!email || !username || !password) {
+        return socket.emit("user-error", "Todos los campos son obligatorios.");
+      }
 
       const cleanEmail = email.toLowerCase().trim();
       const cleanUsername = username.trim();
 
-      // 1. Buscamos por EMAIL únicamente
       let user = await User.findOne({ email: cleanEmail });
 
       if (user) {
-        // 2. Si el email ya existe, validamos que el alias sea el correcto
+        // VALIDACIÓN USUARIO EXISTENTE: Comprobar alias y password
         if (user.username !== cleanUsername) {
           return socket.emit(
             "user-error",
-            "Este email ya está registrado"
+            "Este email ya pertenece a otro alias."
           );
         }
+        
+        // 2. Comparación de contraseña con bcrypt
+        const esValida = await bcrypt.compare(password, user.password);
+        if (!esValida) {
+          return socket.emit("user-error", "Contraseña incorrecta.");
+        }
       } else {
-        // 3. Si el email no existe, creamos el usuario.
-        // Aquí NO comprobamos si el username existe, permitiendo que se repitan.
-        user = await User.create({ 
-          username: cleanUsername, 
-          email: cleanEmail, 
-          conversations: [] 
-        });
+        // CREACIÓN NUEVO USUARIO
+        try {
+          // 3. Validar el formato antes de encriptar
+          const tempUser = new User({ username: cleanUsername, email: cleanEmail, password });
+          await tempUser.validate();
+
+          // 4. Encriptar la contraseña
+          const salt = await bcrypt.genSalt(10);
+          const passwordHasheada = await bcrypt.hash(password, salt);
+
+          user = await User.create({
+            username: cleanUsername,
+            email: cleanEmail,
+            password: passwordHasheada, // Guardamos la encriptada
+            conversations: [],
+          });
+        } catch (validationError) {
+          // Capturamos el error de validación del Schema (REGEX del password)
+          if (validationError.errors && validationError.errors.password) {
+            return socket.emit(
+              "user-error",
+              validationError.errors.password.message
+            );
+          }
+          throw validationError;
+        }
       }
 
-      // Procedemos con la sesión
+      // LOGIN EXITOSO
       usuariosConectados[user._id.toString()] = socket.id;
       socket.mongoId = user._id.toString();
       socket.username = user.username;
 
-      socket.emit("init-session", { userId: user._id.toString() });
+      socket.emit("init-session", {
+        userId: user._id.toString(),
+        tempName: user.username,
+        tempEmail: user.email,
+      });
 
       const lista = await User.find({}, "username _id");
       io.emit("lista-usuarios-global", lista);
     } catch (e) {
-      console.log("Error en Join:", e);
+      console.log("❌ Error:", e);
+      socket.emit("user-error", "Error interno en el servidor.");
     }
   });
 
@@ -85,7 +117,9 @@ io.on("connection", (socket) => {
         const persona = await User.findById(id);
         if (!persona) continue;
 
-        let c = persona.conversations.find((conv) => conv.withUser === targetId);
+        let c = persona.conversations.find(
+          (conv) => conv.withUser === targetId
+        );
         if (!c) {
           persona.conversations.push({
             withUser: targetId,
