@@ -2,7 +2,7 @@ const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
 const mongoose = require("mongoose");
-const bcrypt = require("bcrypt"); // 1. Importación de bcrypt
+const bcrypt = require("bcrypt");
 require("dotenv").config();
 const User = require("./models/User");
 
@@ -38,7 +38,7 @@ io.on("connection", (socket) => {
           );
         }
         
-        // 2. Comparación de contraseña con bcrypt
+        // Comparación de contraseña con bcrypt
         const esValida = await bcrypt.compare(password, user.password);
         if (!esValida) {
           return socket.emit("user-error", "Contraseña incorrecta.");
@@ -46,22 +46,28 @@ io.on("connection", (socket) => {
       } else {
         // CREACIÓN NUEVO USUARIO
         try {
-          // 3. Validar el formato antes de encriptar
+          // --- BLOQUE CORREGIDO ---
+          // 1. Validamos el formato de la contraseña LIMPIA usando el Schema
           const tempUser = new User({ username: cleanUsername, email: cleanEmail, password });
-          await tempUser.validate();
+          await tempUser.validate(); 
 
-          // 4. Encriptar la contraseña
+          // 2. Si la validación pasa, encriptamos
           const salt = await bcrypt.genSalt(10);
           const passwordHasheada = await bcrypt.hash(password, salt);
 
-          user = await User.create({
+          // 3. Creamos el usuario con la contraseña ya encriptada
+          // Usamos .save() o User.create() desactivando la validación posterior para que no choque con el hash
+          user = new User({
             username: cleanUsername,
             email: cleanEmail,
-            password: passwordHasheada, // Guardamos la encriptada
+            password: passwordHasheada, 
             conversations: [],
           });
+          
+          await user.save({ validateBeforeSave: false }); 
+          // ------------------------
+
         } catch (validationError) {
-          // Capturamos el error de validación del Schema (REGEX del password)
           if (validationError.errors && validationError.errors.password) {
             return socket.emit(
               "user-error",
