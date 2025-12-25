@@ -21,31 +21,31 @@ io.on("connection", (socket) => {
     try {
       if (!email || !username) return;
 
-      // Buscamos si el email ya existe
-      let user = await User.findOne({ email });
+      const cleanEmail = email.toLowerCase().trim();
+      const cleanUsername = username.trim();
+
+      // 1. Buscamos por EMAIL únicamente
+      let user = await User.findOne({ email: cleanEmail });
 
       if (user) {
-        if (user.username !== username) {
+        // 2. Si el email ya existe, validamos que el alias sea el correcto
+        if (user.username !== cleanUsername) {
           return socket.emit(
             "user-error",
-            "Este email ya está vinculado a otro alias."
+            "Este email ya pertenece a otro alias. Usa tu nombre original."
           );
         }
       } else {
-        // Si no existe, comprobamos que el alias tampoco esté pillado por otro email
-        let nameCheck = await User.findOne({ username });
-        if (nameCheck) {
-          return socket.emit(
-            "user-error",
-            "El alias ya está en uso por otro usuario."
-          );
-        }
-
-        // Si todo está bien, creamos el usuario
-        user = await User.create({ username, email, conversations: [] });
+        // 3. Si el email no existe, creamos el usuario.
+        // Aquí NO comprobamos si el username existe, permitiendo que se repitan.
+        user = await User.create({ 
+          username: cleanUsername, 
+          email: cleanEmail, 
+          conversations: [] 
+        });
       }
 
-      // Si pasa las validaciones, procedemos normal
+      // Procedemos con la sesión
       usuariosConectados[user._id.toString()] = socket.id;
       socket.mongoId = user._id.toString();
       socket.username = user.username;
@@ -55,7 +55,7 @@ io.on("connection", (socket) => {
       const lista = await User.find({}, "username _id");
       io.emit("lista-usuarios-global", lista);
     } catch (e) {
-      console.log(e);
+      console.log("Error en Join:", e);
     }
   });
 
@@ -80,15 +80,12 @@ io.on("connection", (socket) => {
     };
 
     try {
-      // Guardar en ambos (Remitente y Destinatario)
       for (let id of [socket.mongoId, toUserId]) {
         const targetId = id === socket.mongoId ? toUserId : socket.mongoId;
         const persona = await User.findById(id);
         if (!persona) continue;
 
-        let c = persona.conversations.find(
-          (conv) => conv.withUser === targetId
-        );
+        let c = persona.conversations.find((conv) => conv.withUser === targetId);
         if (!c) {
           persona.conversations.push({
             withUser: targetId,
@@ -100,7 +97,6 @@ io.on("connection", (socket) => {
         await persona.save();
       }
 
-      // Enviar
       socket.emit("mensaje", mensajeObj);
       const receptorSocketId = usuariosConectados[toUserId];
       if (receptorSocketId) {
@@ -118,12 +114,9 @@ io.on("connection", (socket) => {
   socket.on("reset-all-chats", async () => {
     try {
       await User.updateMany({}, { $set: { conversations: [] } });
-      //io.emit("all-chats-reset");
-      console.log(
-        "✅ Todas las conversaciones han sido borradas por el comando secreto."
-      );
+      console.log("✅ Chats reseteados");
     } catch (e) {
-      console.log("❌ Error al borrar conversaciones:", e);
+      console.log("Error reset:", e);
     }
   });
 });

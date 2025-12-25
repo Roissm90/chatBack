@@ -12,7 +12,8 @@ const ConversationSchema = new mongoose.Schema({
 });
 
 const UserSchema = new mongoose.Schema({
-  username: { type: String, required: true, unique: true },
+  username: { type: String, required: true }, // QUITADO unique: true
+  email: { type: String, required: true, unique: true, lowercase: true }, 
   conversations: [ConversationSchema],
 });
 
