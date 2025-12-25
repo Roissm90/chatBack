@@ -27,36 +27,42 @@ io.on("connection", (socket) => {
       const cleanEmail = email.toLowerCase().trim();
       const cleanUsername = username.trim();
 
-      let user = await User.findOne({ email: cleanEmail });
+      // Buscamos por email y por alias por separado para validar
+      let userByEmail = await User.findOne({ email: cleanEmail });
+      let userByUsername = await User.findOne({ username: cleanUsername });
 
-      if (user) {
-        // VALIDACIÓN USUARIO EXISTENTE: Comprobar alias y password
-        if (user.username !== cleanUsername) {
+      let user;
+
+      if (userByEmail) {
+        // CASO 1: El email ya existe
+        if (userByEmail.username !== cleanUsername) {
           return socket.emit(
             "user-error",
             "Este email ya pertenece a otro alias."
           );
         }
         
-        // Comparación de contraseña con bcrypt
-        const esValida = await bcrypt.compare(password, user.password);
+        // Verificamos contraseña
+        const esValida = await bcrypt.compare(password, userByEmail.password);
         if (!esValida) {
           return socket.emit("user-error", "Contraseña incorrecta.");
         }
-      } else {
-        // CREACIÓN NUEVO USUARIO
-        try {
-          // --- BLOQUE CORREGIDO ---
-          // 1. Validamos el formato de la contraseña LIMPIA usando el Schema
-          const tempUser = new User({ username: cleanUsername, email: cleanEmail, password });
-          await tempUser.validate(); 
+        user = userByEmail;
 
-          // 2. Si la validación pasa, encriptamos
+      } else if (userByUsername) {
+        // CASO 2: El email no existe pero el ALIAS SÍ (error de coincidencia)
+        return socket.emit("user-error", "Este alias ya está registrado con otro email.");
+
+      } else {
+        // CASO 3: Usuario nuevo (ni email ni alias existen)
+        try {
+          // Validamos formato antes de encriptar
+          const tempUser = new User({ username: cleanUsername, email: cleanEmail, password });
+          await tempUser.validate();
+
           const salt = await bcrypt.genSalt(10);
           const passwordHasheada = await bcrypt.hash(password, salt);
 
-          // 3. Creamos el usuario con la contraseña ya encriptada
-          // Usamos .save() o User.create() desactivando la validación posterior para que no choque con el hash
           user = new User({
             username: cleanUsername,
             email: cleanEmail,
@@ -65,7 +71,6 @@ io.on("connection", (socket) => {
           });
           
           await user.save({ validateBeforeSave: false }); 
-          // ------------------------
 
         } catch (validationError) {
           if (validationError.errors && validationError.errors.password) {
@@ -92,7 +97,7 @@ io.on("connection", (socket) => {
       const lista = await User.find({}, "username _id");
       io.emit("lista-usuarios-global", lista);
     } catch (e) {
-      console.log("❌ Error:", e);
+      console.log("Error:", e);
       socket.emit("user-error", "Error interno en el servidor.");
     }
   });
