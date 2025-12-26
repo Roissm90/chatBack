@@ -26,10 +26,15 @@ const { upload } = require("./utils/cloudinary");
 
 app.post("/upload-avatar", upload.single("avatar"), (req, res) => {
   try {
-    if (!req.file) return res.status(400).json({ error: "No hay archivo" });
+    if (!req.file) {
+        console.log("❌ No se recibió archivo en el servidor");
+        return res.status(400).json({ error: "No hay archivo" });
+    }
+    console.log("✅ Archivo subido a Cloudinary:", req.file.path);
     res.json({ url: req.file.path });
   } catch (error) {
-    res.status(500).json({ error: "Error al subir a Cloudinary" });
+    console.error("❌ Error CRÍTICO en /upload-avatar:", error);
+    res.status(500).json({ error: error.message || "Error al subir a Cloudinary" });
   }
 });
 
