@@ -3,14 +3,15 @@ const http = require("http");
 const { Server } = require("socket.io");
 const mongoose = require("mongoose");
 const bcrypt = require("bcrypt");
-const cors = require("cors");
+const cors = require("cors"); 
 require("dotenv").config();
 const User = require("./models/User");
 
-
 const app = express();
-app.use(cors({ origin: "*" })); 
-app.use(express.json()); 
+
+// 1. CORS DEBE IR ANTES QUE LAS RUTAS
+app.use(cors({ origin: "*" }));
+app.use(express.json());
 
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: "*" } });
@@ -24,17 +25,23 @@ const usuariosConectados = {};
 
 const { upload } = require("./utils/cloudinary");
 
-app.post("/upload-avatar", upload.single("avatar"), (req, res) => {
-  try {
-    if (!req.file) {
-        console.log("❌ No se recibió archivo en el servidor");
-        return res.status(400).json({ error: "No hay archivo" });
+// 2. RUTA POST MEJORADA PARA LOGUEAR ERRORES
+app.post("/upload-avatar", (req, res, next) => {
+  upload.single("avatar")(req, res, (err) => {
+    if (err) {
+      console.error("❌ ERROR MULTER/CLOUDINARY:", err);
+      return res.status(500).json({ error: err.message });
     }
-    console.log("✅ Archivo subido a Cloudinary:", req.file.path);
+    next();
+  });
+}, (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: "No hay archivo" });
+    console.log("✅ Imagen subida con éxito:", req.file.path);
     res.json({ url: req.file.path });
   } catch (error) {
-    console.error("❌ Error CRÍTICO en /upload-avatar:", error);
-    res.status(500).json({ error: error.message || "Error al subir a Cloudinary" });
+    console.error("❌ Error interno:", error);
+    res.status(500).json({ error: "Error al procesar subida" });
   }
 });
 
@@ -69,7 +76,7 @@ io.on("connection", (socket) => {
           const passRegex = /^(?=.*[A-Za-z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{6,}$/;
 
           if (!passRegex.test(password)) {
-            return socket.emit("user-error", "La contraseña debe tener al menos 6 caracteres, una letra, un número y un símbolo (@$!%*?&).");
+            return socket.emit("user-error", "La contraseña debe tener al menos 6 caracteres...");
           }
 
           const salt = await bcrypt.genSalt(10);
@@ -107,22 +114,20 @@ io.on("connection", (socket) => {
       io.emit("lista-usuarios-global", lista);
     } catch (e) {
       console.log("Error:", e);
-      socket.emit("user-error", "Error interno en el servidor.");
+      socket.emit("user-error", "Error interno.");
     }
   });
 
+  // ACTUALIZAR EL AVATAR DEL USUARIO ACTUAL (TU PERFIL)
   socket.on("update-avatar", async ({ url }) => {
     try {
       if (!socket.mongoId) return;
-      
       await User.findByIdAndUpdate(socket.mongoId, { avatar: url });
       
       const lista = await User.find({}, "username _id avatar"); 
       io.emit("lista-usuarios-global", lista);
-      
-      console.log(`✅ Avatar actualizado para ${socket.username}`);
     } catch (e) {
-      console.error("Error al actualizar avatar:", e);
+      console.log("Error update-avatar:", e);
     }
   });
 
