@@ -4,12 +4,15 @@ const { Server } = require("socket.io");
 const mongoose = require("mongoose");
 const bcrypt = require("bcrypt");
 const cors = require("cors"); 
-require("dotenv").config();
+require("dotenv").config(); // Siempre primero para cargar las variables
 const User = require("./models/User");
+
+// Importamos el configurador de Cloudinary
+const { upload } = require("./utils/cloudinary");
 
 const app = express();
 
-// 1. CORS DEBE IR ANTES QUE LAS RUTAS
+// Configuración de Middlewares
 app.use(cors({ origin: "*" }));
 app.use(express.json());
 
@@ -23,29 +26,23 @@ mongoose
 
 const usuariosConectados = {};
 
-const { upload } = require("./utils/cloudinary");
-
-// 2. RUTA POST MEJORADA PARA LOGUEAR ERRORES
-app.post("/upload-avatar", (req, res, next) => {
+// --- RUTA PARA SUBIR AVATAR ---
+app.post("/upload-avatar", (req, res) => {
   upload.single("avatar")(req, res, (err) => {
     if (err) {
       console.error("❌ ERROR MULTER/CLOUDINARY:", err);
       return res.status(500).json({ error: err.message });
     }
-    next();
-  });
-}, (req, res) => {
-  try {
+    
     if (!req.file) return res.status(400).json({ error: "No hay archivo" });
-    console.log("✅ Imagen subida con éxito:", req.file.path);
+    
+    console.log("✅ Imagen subida correctamente:", req.file.path);
     res.json({ url: req.file.path });
-  } catch (error) {
-    console.error("❌ Error interno:", error);
-    res.status(500).json({ error: "Error al procesar subida" });
-  }
+  });
 });
 
 io.on("connection", (socket) => {
+  // --- EVENTO JOIN (Registro e Inicio de Sesión) ---
   socket.on("join", async ({ username, email, password, avatar }) => { 
     try {
       if (!email || !username || !password) {
@@ -72,11 +69,12 @@ io.on("connection", (socket) => {
       } else if (userByUsername) {
         return socket.emit("user-error", "Este alias ya está registrado con otro email.");
       } else {
+        // Lógica de creación de nuevo usuario
         try {
           const passRegex = /^(?=.*[A-Za-z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{6,}$/;
 
           if (!passRegex.test(password)) {
-            return socket.emit("user-error", "La contraseña debe tener al menos 6 caracteres...");
+            return socket.emit("user-error", "La contraseña debe tener al menos 6 caracteres, una letra, un número y un símbolo (@$!%*?&).");
           }
 
           const salt = await bcrypt.genSalt(10);
@@ -92,6 +90,7 @@ io.on("connection", (socket) => {
 
           await user.save({ validateBeforeSave: false });
         } catch (validationError) {
+          // Recuperado el bloque de errores de validación original
           if (validationError.errors && validationError.errors.password) {
             return socket.emit("user-error", validationError.errors.password.message);
           }
@@ -113,24 +112,29 @@ io.on("connection", (socket) => {
       const lista = await User.find({}, "username _id avatar"); 
       io.emit("lista-usuarios-global", lista);
     } catch (e) {
-      console.log("Error:", e);
-      socket.emit("user-error", "Error interno.");
+      console.log("Error en Join:", e);
+      socket.emit("user-error", "Error interno en el servidor.");
     }
   });
 
-  // ACTUALIZAR EL AVATAR DEL USUARIO ACTUAL (TU PERFIL)
+  // --- NUEVO: EVENTO PARA ACTUALIZAR FOTO DE PERFIL ---
   socket.on("update-avatar", async ({ url }) => {
     try {
       if (!socket.mongoId) return;
+      
       await User.findByIdAndUpdate(socket.mongoId, { avatar: url });
       
+      // Refrescamos la lista para todos
       const lista = await User.find({}, "username _id avatar"); 
       io.emit("lista-usuarios-global", lista);
+      
+      console.log(`✅ Avatar actualizado para el usuario: ${socket.username}`);
     } catch (e) {
-      console.log("Error update-avatar:", e);
+      console.error("Error al actualizar avatar en la DB:", e);
     }
   });
 
+  // --- EVENTO OBTENER CHAT ---
   socket.on("get-chat", async ({ withUserId }) => {
     try {
       if (!socket.mongoId) return;
@@ -138,10 +142,11 @@ io.on("connection", (socket) => {
       const conv = user.conversations.find((c) => c.withUser === withUserId);
       socket.emit("historial", conv ? conv.messages : []);
     } catch (e) {
-      console.log(e);
+      console.log("Error al obtener historial:", e);
     }
   });
 
+  // --- EVENTO MENSAJE DE TEXTO ---
   socket.on("mensaje", async ({ text, toUserId }) => {
     if (!socket.mongoId || !toUserId || !text) return;
 
@@ -175,22 +180,28 @@ io.on("connection", (socket) => {
         io.to(receptorSocketId).emit("mensaje", mensajeObj);
       }
     } catch (e) {
-      console.log(e);
+      console.log("Error al enviar mensaje:", e);
     }
   });
 
   socket.on("disconnect", () => {
-    if (socket.mongoId) delete usuariosConectados[socket.mongoId];
+    if (socket.mongoId) {
+      delete usuariosConectados[socket.mongoId];
+      console.log(`🔌 Usuario desconectado: ${socket.username}`);
+    }
   });
 
+  // --- RESETEAR CHATS ---
   socket.on("reset-all-chats", async () => {
     try {
       await User.updateMany({}, { $set: { conversations: [] } });
-      console.log("✅ Chats reseteados");
+      console.log("✅ Todos los chats han sido borrados de la DB");
     } catch (e) {
-      console.log("Error reset:", e);
+      console.log("Error al resetear chats:", e);
     }
   });
 });
 
-server.listen(process.env.PORT || 10000);
+server.listen(process.env.PORT || 10000, () => {
+  console.log(`🚀 Servidor corriendo en puerto ${process.env.PORT || 10000}`);
+});
