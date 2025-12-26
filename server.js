@@ -101,6 +101,24 @@ io.on("connection", (socket) => {
     }
   });
 
+  // --- NUEVA LÓGICA PARA ACTUALIZAR SOLO EL AVATAR ---
+  socket.on("update-avatar", async ({ url }) => {
+    try {
+      if (!socket.mongoId) return;
+      
+      // Actualizamos el avatar del usuario que emite el evento
+      await User.findByIdAndUpdate(socket.mongoId, { avatar: url });
+      
+      // Volvemos a emitir la lista de usuarios para que todos vean la nueva foto
+      const lista = await User.find({}, "username _id avatar"); 
+      io.emit("lista-usuarios-global", lista);
+      
+      console.log(`✅ Avatar actualizado para ${socket.username}`);
+    } catch (e) {
+      console.error("Error al actualizar avatar:", e);
+    }
+  });
+
   socket.on("get-chat", async ({ withUserId }) => {
     try {
       if (!socket.mongoId) return;
