@@ -3,10 +3,15 @@ const http = require("http");
 const { Server } = require("socket.io");
 const mongoose = require("mongoose");
 const bcrypt = require("bcrypt");
+const cors = require("cors");
 require("dotenv").config();
 const User = require("./models/User");
 
+
 const app = express();
+app.use(cors({ origin: "*" })); 
+app.use(express.json()); 
+
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: "*" } });
 
@@ -101,15 +106,12 @@ io.on("connection", (socket) => {
     }
   });
 
-  // --- NUEVA LÓGICA PARA ACTUALIZAR SOLO EL AVATAR ---
   socket.on("update-avatar", async ({ url }) => {
     try {
       if (!socket.mongoId) return;
       
-      // Actualizamos el avatar del usuario que emite el evento
       await User.findByIdAndUpdate(socket.mongoId, { avatar: url });
       
-      // Volvemos a emitir la lista de usuarios para que todos vean la nueva foto
       const lista = await User.find({}, "username _id avatar"); 
       io.emit("lista-usuarios-global", lista);
       
