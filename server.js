@@ -11,7 +11,7 @@ const User = require("./models/User");
 
 // --- CONFIGURACIÓN DIRECTA DE CLOUDINARY ---
 cloudinary.config({
-  cloud_name: 'roissm90',
+  cloud_name: 'do0s2lutu',
   api_key: '225251422681193',
   api_secret: 'ZWRK6UXUn0jXgnuuMZqbm026d_M'
 });
