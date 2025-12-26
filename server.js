@@ -4,15 +4,32 @@ const { Server } = require("socket.io");
 const mongoose = require("mongoose");
 const bcrypt = require("bcrypt");
 const cors = require("cors"); 
-require("dotenv").config(); // Siempre primero para cargar las variables
+// --- CAMBIO AQUÍ: IMPORTAMOS MULTER Y CLOUDINARY PARA QUE NO DEN ERROR ---
+const multer = require("multer");
+const cloudinary = require("cloudinary").v2;
+const { CloudinaryStorage } = require("multer-storage-cloudinary");
+require("dotenv").config(); 
 const User = require("./models/User");
 
-// Importamos el configurador de Cloudinary
-const { upload } = require("./utils/cloudinary");
+// --- CONFIGURACIÓN DIRECTA DENTRO DEL SERVER PARA QUE FUNCIONE SÍ O SÍ ---
+cloudinary.config({
+  cloud_name: 'roissm90',
+  api_key: '225251422681193',
+  api_secret: 'ZWRK6UXUn0jXgnuuMZqbm026d_M'
+});
+
+const storage = new CloudinaryStorage({
+  cloudinary: cloudinary,
+  params: {
+    folder: 'chat_avatars',
+    allowed_formats: ['jpg', 'png', 'jpeg'],
+    transformation: [{ width: 250, height: 250, crop: 'fill' }]
+  },
+});
+const upload = multer({ storage: storage });
 
 const app = express();
 
-// Configuración de Middlewares
 app.use(cors({ origin: "*" }));
 app.use(express.json());
 
@@ -26,7 +43,7 @@ mongoose
 
 const usuariosConectados = {};
 
-// --- RUTA PARA SUBIR AVATAR ---
+// --- RUTA PARA SUBIR AVATAR (Mantenemos tu estructura de errores) ---
 app.post("/upload-avatar", (req, res) => {
   upload.single("avatar")(req, res, (err) => {
     if (err) {
@@ -42,7 +59,6 @@ app.post("/upload-avatar", (req, res) => {
 });
 
 io.on("connection", (socket) => {
-  // --- EVENTO JOIN (Registro e Inicio de Sesión) ---
   socket.on("join", async ({ username, email, password, avatar }) => { 
     try {
       if (!email || !username || !password) {
@@ -69,7 +85,6 @@ io.on("connection", (socket) => {
       } else if (userByUsername) {
         return socket.emit("user-error", "Este alias ya está registrado con otro email.");
       } else {
-        // Lógica de creación de nuevo usuario
         try {
           const passRegex = /^(?=.*[A-Za-z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{6,}$/;
 
@@ -90,7 +105,6 @@ io.on("connection", (socket) => {
 
           await user.save({ validateBeforeSave: false });
         } catch (validationError) {
-          // Recuperado el bloque de errores de validación original
           if (validationError.errors && validationError.errors.password) {
             return socket.emit("user-error", validationError.errors.password.message);
           }
@@ -117,24 +131,18 @@ io.on("connection", (socket) => {
     }
   });
 
-  // --- NUEVO: EVENTO PARA ACTUALIZAR FOTO DE PERFIL ---
   socket.on("update-avatar", async ({ url }) => {
     try {
       if (!socket.mongoId) return;
-      
       await User.findByIdAndUpdate(socket.mongoId, { avatar: url });
-      
-      // Refrescamos la lista para todos
       const lista = await User.find({}, "username _id avatar"); 
       io.emit("lista-usuarios-global", lista);
-      
       console.log(`✅ Avatar actualizado para el usuario: ${socket.username}`);
     } catch (e) {
       console.error("Error al actualizar avatar en la DB:", e);
     }
   });
 
-  // --- EVENTO OBTENER CHAT ---
   socket.on("get-chat", async ({ withUserId }) => {
     try {
       if (!socket.mongoId) return;
@@ -146,34 +154,26 @@ io.on("connection", (socket) => {
     }
   });
 
-  // --- EVENTO MENSAJE DE TEXTO ---
   socket.on("mensaje", async ({ text, toUserId }) => {
     if (!socket.mongoId || !toUserId || !text) return;
-
     const mensajeObj = {
       user: socket.username,
       text,
       timestamp: new Date(),
     };
-
     try {
       for (let id of [socket.mongoId, toUserId]) {
         const targetId = id === socket.mongoId ? toUserId : socket.mongoId;
         const persona = await User.findById(id);
         if (!persona) continue;
-
         let c = persona.conversations.find((conv) => conv.withUser === targetId);
         if (!c) {
-          persona.conversations.push({
-            withUser: targetId,
-            messages: [mensajeObj],
-          });
+          persona.conversations.push({ withUser: targetId, messages: [mensajeObj] });
         } else {
           c.messages.push(mensajeObj);
         }
         await persona.save();
       }
-
       socket.emit("mensaje", mensajeObj);
       const receptorSocketId = usuariosConectados[toUserId];
       if (receptorSocketId) {
@@ -191,7 +191,6 @@ io.on("connection", (socket) => {
     }
   });
 
-  // --- RESETEAR CHATS ---
   socket.on("reset-all-chats", async () => {
     try {
       await User.updateMany({}, { $set: { conversations: [] } });
@@ -202,6 +201,7 @@ io.on("connection", (socket) => {
   });
 });
 
+// --- FIX: EL TEST AHORA TIENE ACCESO A CLOUDINARY ---
 const testCloudinary = async () => {
   try {
     const result = await cloudinary.uploader.upload("https://upload.wikimedia.org/wikipedia/commons/a/a3/Image-empty.png", { folder: "test" });
