@@ -15,6 +15,7 @@ const UserSchema = new mongoose.Schema({
   username: { type: String, required: true }, // QUITADO unique: true
   email: { type: String, required: true, unique: true, lowercase: true }, 
   password: {type: String, required: true,},
+  avatar: { type: String, default: "https://ruta-a-foto-por-defecto.png" },
   conversations: [ConversationSchema],
 });
 
