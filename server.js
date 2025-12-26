@@ -4,28 +4,20 @@ const { Server } = require("socket.io");
 const mongoose = require("mongoose");
 const bcrypt = require("bcrypt");
 const cors = require("cors"); 
-// --- CAMBIO AQUÍ: IMPORTAMOS MULTER Y CLOUDINARY PARA QUE NO DEN ERROR ---
 const multer = require("multer");
 const cloudinary = require("cloudinary").v2;
-const { CloudinaryStorage } = require("multer-storage-cloudinary");
 require("dotenv").config(); 
 const User = require("./models/User");
 
-// --- CONFIGURACIÓN DIRECTA DENTRO DEL SERVER PARA QUE FUNCIONE SÍ O SÍ ---
+// --- CONFIGURACIÓN DIRECTA DE CLOUDINARY ---
 cloudinary.config({
   cloud_name: 'roissm90',
   api_key: '225251422681193',
   api_secret: 'ZWRK6UXUn0jXgnuuMZqbm026d_M'
 });
 
-const storage = new CloudinaryStorage({
-  cloudinary: cloudinary,
-  params: {
-    folder: 'chat_avatars',
-    allowed_formats: ['jpg', 'png', 'jpeg'],
-    transformation: [{ width: 250, height: 250, crop: 'fill' }]
-  },
-});
+// Cambiamos a memoryStorage para evitar el error del cloud_name en el handshake inicial
+const storage = multer.memoryStorage();
 const upload = multer({ storage: storage });
 
 const app = express();
@@ -43,22 +35,30 @@ mongoose
 
 const usuariosConectados = {};
 
-// --- RUTA PARA SUBIR AVATAR (Mantenemos tu estructura de errores) ---
-app.post("/upload-avatar", (req, res) => {
-  upload.single("avatar")(req, res, (err) => {
-    if (err) {
-      console.error("❌ ERROR MULTER/CLOUDINARY:", err);
-      return res.status(500).json({ error: err.message });
+// --- RUTA PARA SUBIR AVATAR (MODIFICADA PARA SUBIDA DIRECTA) ---
+app.post("/upload-avatar", upload.single("avatar"), (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ error: "No hay archivo" });
+  }
+
+  // Subida manual a Cloudinary vía Stream para saltarnos el fallo de la librería
+  const uploadStream = cloudinary.uploader.upload_stream(
+    { folder: 'chat_avatars' },
+    (error, result) => {
+      if (error) {
+        console.error("❌ ERROR CLOUDINARY DIRECTO:", error);
+        return res.status(500).json({ error: error.message });
+      }
+      console.log("✅ Imagen subida correctamente:", result.secure_url);
+      res.json({ url: result.secure_url });
     }
-    
-    if (!req.file) return res.status(400).json({ error: "No hay archivo" });
-    
-    console.log("✅ Imagen subida correctamente:", req.file.path);
-    res.json({ url: req.file.path });
-  });
+  );
+
+  uploadStream.end(req.file.buffer);
 });
 
 io.on("connection", (socket) => {
+  // --- EVENTO JOIN (Registro e Inicio de Sesión) ---
   socket.on("join", async ({ username, email, password, avatar }) => { 
     try {
       if (!email || !username || !password) {
@@ -201,13 +201,13 @@ io.on("connection", (socket) => {
   });
 });
 
-// --- FIX: EL TEST AHORA TIENE ACCESO A CLOUDINARY ---
+// Prueba de diagnóstico al arrancar
 const testCloudinary = async () => {
   try {
-    const result = await cloudinary.uploader.upload("https://upload.wikimedia.org/wikipedia/commons/a/a3/Image-empty.png", { folder: "test" });
-    console.log("✅ Prueba de Cloudinary exitosa:", result.url);
+    const result = await cloudinary.api.ping();
+    console.log("✅ Conexión con Cloudinary establecida:", result.status);
   } catch (err) {
-    console.error("❌ Prueba de Cloudinary fallida:", err.message);
+    console.error("❌ Cloudinary sigue rechazando las credenciales:", err.message);
   }
 };
 testCloudinary();
