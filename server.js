@@ -202,6 +202,16 @@ io.on("connection", (socket) => {
   });
 });
 
+const testCloudinary = async () => {
+  try {
+    const result = await cloudinary.uploader.upload("https://upload.wikimedia.org/wikipedia/commons/a/a3/Image-empty.png", { folder: "test" });
+    console.log("✅ Prueba de Cloudinary exitosa:", result.url);
+  } catch (err) {
+    console.error("❌ Prueba de Cloudinary fallida:", err.message);
+  }
+};
+testCloudinary();
+
 server.listen(process.env.PORT || 10000, () => {
   console.log(`🚀 Servidor corriendo en puerto ${process.env.PORT || 10000}`);
 });

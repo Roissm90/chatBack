@@ -2,6 +2,7 @@ const cloudinary = require('cloudinary').v2;
 const { CloudinaryStorage } = require('multer-storage-cloudinary');
 const multer = require('multer');
 
+// Datos extraídos de tus capturas. Configuración directa.
 cloudinary.config({
   cloud_name: 'roissm90',
   api_key: '225251422681193',
@@ -10,12 +11,10 @@ cloudinary.config({
 
 const storage = new CloudinaryStorage({
   cloudinary: cloudinary,
-  params: async (req, file) => {
-    return {
-      folder: 'chat_avatars',
-      allowed_formats: ['jpg', 'png', 'jpeg'],
-      public_id: `avatar-${Date.now()}`
-    };
+  params: {
+    folder: 'chat_avatars',
+    allowed_formats: ['jpg', 'png', 'jpeg'],
+    transformation: [{ width: 200, height: 200, crop: 'thumb', gravity: 'face' }]
   },
 });
 
