@@ -240,6 +240,42 @@ io.on("connection", (socket) => {
     await Message.findByIdAndUpdate(messageId, { visto: true });
   });
 
+  socket.on("delete-message", async ({ messageId, toUserId }) => {
+    try {
+      await Message.findByIdAndDelete(messageId);
+
+      const socketDestino = usuariosConectados[toUserId];
+
+      if (socketDestino) {
+        io.to(socketDestino).emit("message-deleted", { messageId });
+      }
+
+      socket.emit("message-deleted", { messageId });
+
+      console.log(`✅ Mensaje ${messageId} borrado.`);
+    } catch (err) {
+      console.error("Error al borrar:", err);
+    }
+  });
+
+  socket.on("edit-message", async ({ messageId, newText, toUserId }) => {
+    try {
+      await Message.findByIdAndUpdate(messageId, { text: newText });
+
+      const socketDestino = usuariosConectados[toUserId];
+
+      if (socketDestino) {
+        io.to(socketDestino).emit("message-edited", { messageId, newText });
+      }
+
+      socket.emit("message-edited", { messageId, newText });
+
+      console.log(`✅ Mensaje ${messageId} editado.`);
+    } catch (err) {
+      console.error("Error al editar:", err);
+    }
+  });
+
   socket.on("disconnect", () => {
     console.log(
       `Intentando desconectar socket: ${socket.id}, MongoID: ${socket.mongoId}`
