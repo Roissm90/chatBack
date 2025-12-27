@@ -115,6 +115,7 @@ io.on("connection", (socket) => {
       usuariosConectados[user._id.toString()] = socket.id;
       socket.mongoId = user._id.toString();
       socket.username = user.username;
+      io.emit("usuario-estado", { userId: user._id.toString(), estado: "online" });
 
       socket.emit("init-session", {
         userId: user._id.toString(),
@@ -129,6 +130,11 @@ io.on("connection", (socket) => {
       console.log("Error en Join:", e);
       socket.emit("user-error", "Error interno en el servidor.");
     }
+  });
+
+  socket.on("check-online", ({ userId }) => {
+    const estado = usuariosConectados[userId] ? "online" : "offline";
+    socket.emit("respuesta-online", { userId, estado });
   });
 
   socket.on("update-avatar", async ({ url }) => {
@@ -186,6 +192,8 @@ io.on("connection", (socket) => {
 
   socket.on("disconnect", () => {
     if (socket.mongoId) {
+      io.emit("usuario-estado", { userId: socket.mongoId, estado: "offline" });
+      
       delete usuariosConectados[socket.mongoId];
       console.log(`🔌 Usuario desconectado: ${socket.username}`);
     }
