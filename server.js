@@ -8,6 +8,8 @@ const multer = require("multer");
 const cloudinary = require("cloudinary").v2;
 require("dotenv").config();
 const User = require("./models/User");
+const Message = require("./models/Messaje");
+
 
 // --- CONFIGURACIÓN DIRECTA DE CLOUDINARY ---
 cloudinary.config({
@@ -209,39 +211,32 @@ io.on("connection", (socket) => {
     }
   });
 
-  socket.on("mensaje", async ({ text, toUserId }) => {
-    if (!socket.mongoId || !toUserId || !text) return;
-    const mensajeObj = {
-      user: socket.username,
+  socket.on("mensaje", async (data) => {
+    const { text, toUserId } = data;
+    const fromUserId = socket.mongoId;
+
+    const socketDestino = usuariosConectados[toUserId];
+
+    const nuevoMensaje = new Message({
       text,
+      fromUserId,
+      toUserId,
+      user: socket.username,
       timestamp: new Date(),
-    };
-    try {
-      for (let id of [socket.mongoId, toUserId]) {
-        const targetId = id === socket.mongoId ? toUserId : socket.mongoId;
-        const persona = await User.findById(id);
-        if (!persona) continue;
-        let c = persona.conversations.find(
-          (conv) => conv.withUser === targetId
-        );
-        if (!c) {
-          persona.conversations.push({
-            withUser: targetId,
-            messages: [mensajeObj],
-          });
-        } else {
-          c.messages.push(mensajeObj);
-        }
-        await persona.save();
-      }
-      socket.emit("mensaje", mensajeObj);
-      const receptorSocketId = usuariosConectados[toUserId];
-      if (receptorSocketId) {
-        io.to(receptorSocketId).emit("mensaje", mensajeObj);
-      }
-    } catch (e) {
-      console.log("Error al enviar mensaje:", e);
+      visto: false,
+    });
+
+    await nuevoMensaje.save();
+
+    if (socketDestino) {
+      io.to(socketDestino).emit("mensaje", nuevoMensaje);
     }
+
+    socket.emit("mensaje", nuevoMensaje);
+  });
+
+  socket.on("marcar-visto", async ({ messageId }) => {
+    await Message.findByIdAndUpdate(messageId, { visto: true });
   });
 
   socket.on("disconnect", () => {
