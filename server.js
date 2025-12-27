@@ -167,18 +167,10 @@ io.on("connection", (socket) => {
   });
 
   socket.on("get-chat", async ({ withUserId }) => {
-    const miId = socket.mongoId; // Tu ID de usuario
+    const miId = socket.mongoId;
 
     try {
-      await Message.updateMany(
-        {
-          fromUserId: withUserId,
-          toUserId: miId,
-          visto: false,
-        },
-        { $set: { visto: true } }
-      );
-
+      // ELIMINAMOS el Message.updateMany de aquí para que no limpie las notificaciones solo por mirar
       const mensajes = await Message.find({
         $or: [
           { fromUserId: miId, toUserId: withUserId },
@@ -188,7 +180,18 @@ io.on("connection", (socket) => {
 
       socket.emit("historial", mensajes);
     } catch (err) {
-      console.error("Error al obtener/actualizar chat:", err);
+      console.error("Error al obtener chat:", err);
+    }
+  });
+
+  socket.on("marcar-chat-leido", async ({ withUserId }) => {
+    try {
+      await Message.updateMany(
+        { fromUserId: withUserId, toUserId: socket.mongoId, visto: false },
+        { $set: { visto: true } }
+      );
+    } catch (e) {
+      console.log("Error al marcar chat como leído:", e);
     }
   });
 
