@@ -3,17 +3,17 @@ const http = require("http");
 const { Server } = require("socket.io");
 const mongoose = require("mongoose");
 const bcrypt = require("bcrypt");
-const cors = require("cors"); 
+const cors = require("cors");
 const multer = require("multer");
 const cloudinary = require("cloudinary").v2;
-require("dotenv").config(); 
+require("dotenv").config();
 const User = require("./models/User");
 
 // --- CONFIGURACIÓN DIRECTA DE CLOUDINARY ---
 cloudinary.config({
-  cloud_name: 'do0s2lutu',
-  api_key: '225251422681193',
-  api_secret: 'ZWRK6UXUn0jXgnuuMZqbm026d_M'
+  cloud_name: "do0s2lutu",
+  api_key: "225251422681193",
+  api_secret: "ZWRK6UXUn0jXgnuuMZqbm026d_M",
 });
 
 // Cambiamos a memoryStorage para evitar el error del cloud_name en el handshake inicial
@@ -43,7 +43,7 @@ app.post("/upload-avatar", upload.single("avatar"), (req, res) => {
 
   // Subida manual a Cloudinary vía Stream para saltarnos el fallo de la librería
   const uploadStream = cloudinary.uploader.upload_stream(
-    { folder: 'chat_avatars' },
+    { folder: "chat_avatars" },
     (error, result) => {
       if (error) {
         console.error("❌ ERROR CLOUDINARY DIRECTO:", error);
@@ -59,7 +59,7 @@ app.post("/upload-avatar", upload.single("avatar"), (req, res) => {
 
 io.on("connection", (socket) => {
   // --- EVENTO JOIN (Registro e Inicio de Sesión) ---
-  socket.on("join", async ({ username, email, password, avatar }) => { 
+  socket.on("join", async ({ username, email, password, avatar }) => {
     try {
       if (!email || !username || !password) {
         return socket.emit("user-error", "Todos los campos son obligatorios.");
@@ -75,7 +75,10 @@ io.on("connection", (socket) => {
 
       if (userByEmail) {
         if (userByEmail.username !== cleanUsername) {
-          return socket.emit("user-error", "Este email ya pertenece a otro alias.");
+          return socket.emit(
+            "user-error",
+            "Este email ya pertenece a otro alias."
+          );
         }
         const esValida = await bcrypt.compare(password, userByEmail.password);
         if (!esValida) {
@@ -83,13 +86,20 @@ io.on("connection", (socket) => {
         }
         user = userByEmail;
       } else if (userByUsername) {
-        return socket.emit("user-error", "Este alias ya está registrado con otro email.");
+        return socket.emit(
+          "user-error",
+          "Este alias ya está registrado con otro email."
+        );
       } else {
         try {
-          const passRegex = /^(?=.*[A-Za-z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{6,}$/;
+          const passRegex =
+            /^(?=.*[A-Za-z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{6,}$/;
 
           if (!passRegex.test(password)) {
-            return socket.emit("user-error", "La contraseña debe tener al menos 6 caracteres, una letra, un número y un símbolo (@$!%*?&).");
+            return socket.emit(
+              "user-error",
+              "La contraseña debe tener al menos 6 caracteres, una letra, un número y un símbolo (@$!%*?&)."
+            );
           }
 
           const salt = await bcrypt.genSalt(10);
@@ -106,7 +116,10 @@ io.on("connection", (socket) => {
           await user.save({ validateBeforeSave: false });
         } catch (validationError) {
           if (validationError.errors && validationError.errors.password) {
-            return socket.emit("user-error", validationError.errors.password.message);
+            return socket.emit(
+              "user-error",
+              validationError.errors.password.message
+            );
           }
           throw validationError;
         }
@@ -115,16 +128,19 @@ io.on("connection", (socket) => {
       usuariosConectados[user._id.toString()] = socket.id;
       socket.mongoId = user._id.toString();
       socket.username = user.username;
-      io.emit("usuario-estado", { userId: user._id.toString(), estado: "online" });
+      io.emit("usuario-estado", {
+        userId: user._id.toString(),
+        estado: "online",
+      });
 
       socket.emit("init-session", {
         userId: user._id.toString(),
         tempName: user.username,
         tempEmail: user.email,
-        tempAvatar: user.avatar
+        tempAvatar: user.avatar,
       });
 
-      const lista = await User.find({}, "username _id avatar"); 
+      const lista = await User.find({}, "username _id avatar");
       io.emit("lista-usuarios-global", lista);
     } catch (e) {
       console.log("Error en Join:", e);
@@ -141,7 +157,7 @@ io.on("connection", (socket) => {
     try {
       if (!socket.mongoId) return;
       await User.findByIdAndUpdate(socket.mongoId, { avatar: url });
-      const lista = await User.find({}, "username _id avatar"); 
+      const lista = await User.find({}, "username _id avatar");
       io.emit("lista-usuarios-global", lista);
       console.log(`✅ Avatar actualizado para el usuario: ${socket.username}`);
     } catch (e) {
@@ -160,6 +176,24 @@ io.on("connection", (socket) => {
     }
   });
 
+  socket.on("escribiendo", ({ toUserId }) => {
+    const socketDestino = usuariosConectados[toUserId];
+    if (socketDestino) {
+      io.to(socketDestino).emit("usuario-escribiendo", {
+        fromUserId: socket.mongoId,
+      });
+    }
+  });
+
+  socket.on("deja-escribiendo", ({ toUserId }) => {
+    const socketDestino = usuariosConectados[toUserId];
+    if (socketDestino) {
+      io.to(socketDestino).emit("usuario-estado-deja-escribiendo", {
+        fromUserId: socket.mongoId,
+      });
+    }
+  });
+
   socket.on("mensaje", async ({ text, toUserId }) => {
     if (!socket.mongoId || !toUserId || !text) return;
     const mensajeObj = {
@@ -172,9 +206,14 @@ io.on("connection", (socket) => {
         const targetId = id === socket.mongoId ? toUserId : socket.mongoId;
         const persona = await User.findById(id);
         if (!persona) continue;
-        let c = persona.conversations.find((conv) => conv.withUser === targetId);
+        let c = persona.conversations.find(
+          (conv) => conv.withUser === targetId
+        );
         if (!c) {
-          persona.conversations.push({ withUser: targetId, messages: [mensajeObj] });
+          persona.conversations.push({
+            withUser: targetId,
+            messages: [mensajeObj],
+          });
         } else {
           c.messages.push(mensajeObj);
         }
@@ -191,15 +230,17 @@ io.on("connection", (socket) => {
   });
 
   socket.on("disconnect", () => {
-    console.log(`Intentando desconectar socket: ${socket.id}, MongoID: ${socket.mongoId}`);
+    console.log(
+      `Intentando desconectar socket: ${socket.id}, MongoID: ${socket.mongoId}`
+    );
 
     if (socket.mongoId) {
       const idParaBorrar = socket.mongoId;
-      
+
       delete usuariosConectados[idParaBorrar];
-      
+
       io.emit("usuario-estado", { userId: idParaBorrar, estado: "offline" });
-      
+
       console.log(`✅ Usuario ${socket.username} marcado como OFFLINE`);
     }
   });
@@ -220,7 +261,10 @@ const testCloudinary = async () => {
     const result = await cloudinary.api.ping();
     console.log("✅ Conexión con Cloudinary establecida:", result.status);
   } catch (err) {
-    console.error("❌ Cloudinary sigue rechazando las credenciales:", err.message);
+    console.error(
+      "❌ Cloudinary sigue rechazando las credenciales:",
+      err.message
+    );
   }
 };
 testCloudinary();
