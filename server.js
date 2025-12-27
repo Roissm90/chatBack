@@ -10,7 +10,6 @@ require("dotenv").config();
 const User = require("./models/User");
 const Message = require("./models/Messaje");
 
-
 // --- CONFIGURACIÓN DIRECTA DE CLOUDINARY ---
 cloudinary.config({
   cloud_name: "do0s2lutu",
@@ -215,12 +214,10 @@ io.on("connection", (socket) => {
     const { text, toUserId } = data;
     const fromUserId = socket.mongoId;
 
-    const socketDestino = usuariosConectados[toUserId];
-
     const nuevoMensaje = new Message({
       text,
-      fromUserId,
-      toUserId,
+      fromUserId, // El ID de quien envía
+      toUserId, // El ID de quien recibe
       user: socket.username,
       timestamp: new Date(),
       visto: false,
@@ -228,6 +225,7 @@ io.on("connection", (socket) => {
 
     await nuevoMensaje.save();
 
+    const socketDestino = usuariosConectados[toUserId];
     if (socketDestino) {
       io.to(socketDestino).emit("mensaje", nuevoMensaje);
     }
