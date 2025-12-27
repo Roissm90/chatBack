@@ -191,11 +191,16 @@ io.on("connection", (socket) => {
   });
 
   socket.on("disconnect", () => {
+    console.log(`Intentando desconectar socket: ${socket.id}, MongoID: ${socket.mongoId}`);
+
     if (socket.mongoId) {
-      io.emit("usuario-estado", { userId: socket.mongoId, estado: "offline" });
+      const idParaBorrar = socket.mongoId;
       
-      delete usuariosConectados[socket.mongoId];
-      console.log(`🔌 Usuario desconectado: ${socket.username}`);
+      delete usuariosConectados[idParaBorrar];
+      
+      io.emit("usuario-estado", { userId: idParaBorrar, estado: "offline" });
+      
+      console.log(`✅ Usuario ${socket.username} marcado como OFFLINE`);
     }
   });
 
