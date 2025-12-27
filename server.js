@@ -166,13 +166,28 @@ io.on("connection", (socket) => {
   });
 
   socket.on("get-chat", async ({ withUserId }) => {
+    const miId = socket.mongoId; // Tu ID de usuario
+
     try {
-      if (!socket.mongoId) return;
-      const user = await User.findById(socket.mongoId);
-      const conv = user.conversations.find((c) => c.withUser === withUserId);
-      socket.emit("historial", conv ? conv.messages : []);
-    } catch (e) {
-      console.log("Error al obtener historial:", e);
+      await Message.updateMany(
+        {
+          fromUserId: withUserId,
+          toUserId: miId,
+          visto: false,
+        },
+        { $set: { visto: true } }
+      );
+
+      const mensajes = await Message.find({
+        $or: [
+          { fromUserId: miId, toUserId: withUserId },
+          { fromUserId: withUserId, toUserId: miId },
+        ],
+      }).sort({ timestamp: 1 });
+
+      socket.emit("historial", mensajes);
+    } catch (err) {
+      console.error("Error al obtener/actualizar chat:", err);
     }
   });
 
