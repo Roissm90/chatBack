@@ -166,6 +166,29 @@ io.on("connection", (socket) => {
     }
   });
 
+  app.post("/upload-file", upload.single("archivo"), (req, res) => {
+    if (!req.file) {
+      return res.status(400).json({ error: "No hay archivo en la petición" });
+    }
+
+    const uploadStream = cloudinary.uploader.upload_stream(
+      {
+        folder: "chat_files",
+        resource_type: "auto",
+      },
+      (error, result) => {
+        if (error) {
+          console.error("❌ ERROR CLOUDINARY FILE:", error);
+          return res.status(500).json({ error: error.message });
+        }
+        console.log("✅ Archivo subido a Cloudinary:", result.secure_url);
+        res.json({ url: result.secure_url });
+      }
+    );
+
+    uploadStream.end(req.file.buffer);
+  });
+
   socket.on("get-chat", async ({ withUserId }) => {
     const miId = socket.mongoId;
 
