@@ -235,7 +235,7 @@ io.on("connection", (socket) => {
       });
     }
   });
-  /*
+  
   socket.on("mensaje", async (data) => {
     const { text, toUserId } = data;
     const fromUserId = socket.mongoId;
@@ -257,40 +257,6 @@ io.on("connection", (socket) => {
     }
 
     socket.emit("mensaje", nuevoMensaje);
-  });
-  */
-
-  // MODIFICACIÓN EN EL SERVIDOR
-  socket.on("mensaje", async (data) => {
-    // Ahora recibimos también tempId (si existe)
-    const { text, toUserId, tempId } = data;
-    const fromUserId = socket.mongoId;
-
-    const nuevoMensaje = new Message({
-      text,
-      fromUserId,
-      toUserId,
-      user: socket.username,
-      timestamp: new Date(),
-      visto: false,
-    });
-
-    await nuevoMensaje.save();
-
-    // Convertimos el documento de Mongo a un objeto plano para añadirle el tempId
-    const mensajeParaEnviar = {
-      ...nuevoMensaje.toObject(),
-      tempId: tempId, // Devolvemos el ID del spinner al emisor
-    };
-
-    const socketDestino = usuariosConectados[toUserId];
-    if (socketDestino) {
-      // Al destinatario no le importa el tempId, solo al que lo envió
-      io.to(socketDestino).emit("mensaje", nuevoMensaje);
-    }
-
-    // Al emisor le devolvemos el mensaje oficial + su tempId original
-    socket.emit("mensaje", mensajeParaEnviar);
   });
   
   socket.on("marcar-visto", async ({ messageId }) => {
