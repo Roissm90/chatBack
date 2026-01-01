@@ -285,32 +285,31 @@ io.on("connection", (socket) => {
 
   socket.on("delete-message", async ({ messageId, toUserId }) => {
     try {
-      // 1. Buscamos el mensaje ANTES de borrarlo para saber quién lo envió
       const mensaje = await Message.findById(messageId);
 
       if (!mensaje) {
         return console.log(`⚠️ Mensaje ${messageId} no encontrado.`);
       }
 
-      const idDelQueEnvia = mensaje.fromUserId; // Guardamos el ID del autor
+      const idDelQueEnvia = mensaje.fromUserId;
+      const estabaVisto = mensaje.visto;
 
-      // 2. Ahora sí, lo borramos
       await Message.findByIdAndDelete(messageId);
 
       const socketDestino = usuariosConectados[toUserId];
 
-      // 3. Enviamos el messageId Y el fromUserId
       if (socketDestino) {
         io.to(socketDestino).emit("message-deleted", { 
           messageId, 
-          fromUserId: idDelQueEnvia 
+          fromUserId: idDelQueEnvia,
+          visto: estabaVisto
         });
       }
 
-      // También notificamos al que lo borró (por si tiene varias pestañas abiertas)
       socket.emit("message-deleted", { 
         messageId, 
-        fromUserId: idDelQueEnvia 
+        fromUserId: idDelQueEnvia,
+        visto: estabaVisto
       });
 
       console.log(`✅ Mensaje ${messageId} de usuario ${idDelQueEnvia} borrado.`);

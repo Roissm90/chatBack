@@ -6,7 +6,7 @@ const MessageSchema = new mongoose.Schema({
   user: { type: String, required: true },
   text: { type: String, required: true },
   timestamp: { type: Date, default: Date.now },
-  visto: { type: Boolean, default: false } // Usamos 'visto' para coincidir con tu server
+  visto: { type: Boolean, default: false }
 });
 
 module.exports = mongoose.model("Message", MessageSchema);
